@@ -242,6 +242,7 @@ impl Interp {
             "define" => self.sf_define(args),
             "set" => self.sf_set(args, true),
             "setq" => self.sf_set(args, false),
+            "setf" => self.sf_setf(args),
             "let" => self.sf_let(args),
             "lambda" | "fn" => self.sf_lambda(args, false),
             "lambda-macro" => self.sf_lambda(args, true),
@@ -357,11 +358,11 @@ impl Interp {
     }
 
     fn sf_incr(&self, args: &[Value], sign: i64) -> Result<Value, Signal> {
-        // (++ sym [amount]) / (-- sym [amount]) — mutate a symbol in place.
-        let sym = match args.first() {
-            Some(Value::Symbol(id)) => *id,
-            _ => return Err(Signal::error("++/--: expected a symbol")),
-        };
+        // (++ place [amount]) / (inc place [amount]) — mutate a numeric place.
+        let place = self.resolve_place(
+            args.first()
+                .ok_or_else(|| Signal::error("++/--: expected a place"))?,
+        )?;
         let delta = match args.get(1) {
             Some(e) => match self.eval(e)? {
                 Value::Int(n) => n,
@@ -370,15 +371,39 @@ impl Interp {
             },
             None => 1,
         };
-        let base = match self.lookup(sym) {
-            Value::Int(n) => n,
-            Value::Nil => 0,
-            Value::Float(f) => f as i64,
-            _ => return Err(Signal::error("++/--: symbol is not a number")),
+        let apply = |v: &mut Value| -> Result<Value, Signal> {
+            let base = match v {
+                Value::Int(n) => *n,
+                Value::Nil => 0,
+                Value::Float(f) => *f as i64,
+                _ => return Err(Signal::error("++/--: place is not a number")),
+            };
+            let next = base.wrapping_add(sign.wrapping_mul(delta));
+            *v = Value::Int(next);
+            Ok(Value::Int(next))
         };
-        let next = base.wrapping_add(sign.wrapping_mul(delta));
-        self.set_global(sym, Value::Int(next));
-        Ok(Value::Int(next))
+        self.with_place_mut(&place, apply)
+    }
+
+    fn sf_setf(&self, args: &[Value]) -> Result<Value, Signal> {
+        // (setf place value [place value ...]) — assign into places.
+        if args.len() % 2 != 0 {
+            return Err(Signal::error("setf: expected place/value pairs"));
+        }
+        let mut last = Value::Nil;
+        let mut i = 0;
+        while i + 1 < args.len() {
+            let val = self.eval(&args[i + 1])?;
+            let place = self.resolve_place(&args[i])?;
+            let v = val.clone();
+            self.with_place_mut(&place, move |loc| {
+                *loc = v;
+                Ok(Value::Nil)
+            })?;
+            last = val;
+            i += 2;
+        }
+        Ok(last)
     }
 
     fn sf_for(&self, args: &[Value]) -> Result<Value, Signal> {
@@ -484,15 +509,12 @@ impl Interp {
     }
 
     fn sf_push(&self, args: &[Value]) -> Result<Value, Signal> {
-        // (push value place [index]) — place is a symbol holding a list.
+        // (push value place [index]) — place designates a list (or nil -> list).
         if args.len() < 2 {
             return Err(Signal::error("push: expected (push value place [index])"));
         }
         let value = self.eval(&args[0])?;
-        let place = match &args[1] {
-            Value::Symbol(id) => *id,
-            _ => return Err(Signal::error("push: place must be a symbol")),
-        };
+        let place = self.resolve_place(&args[1])?;
         let index = match args.get(2) {
             Some(e) => match self.eval(e)? {
                 Value::Int(n) => Some(n),
@@ -500,34 +522,34 @@ impl Interp {
             },
             None => None,
         };
-
-        let mut list = match self.lookup(place) {
-            Value::List(l) => l,
-            Value::Nil => Vec::new(),
-            other => {
-                return Err(Signal::Error(format!(
-                    "push: place is not a list: {}",
-                    self.repr(&other)
-                )))
-            }
-        };
-        let at = match index {
-            None => 0,
-            Some(i) if i < 0 => (list.len() as i64 + 1 + i).max(0) as usize,
-            Some(i) => (i as usize).min(list.len()),
-        };
-        list.insert(at.min(list.len()), value);
-        let result = Value::List(list);
-        self.set_global(place, result.clone());
-        Ok(result)
+        self.with_place_mut(&place, move |loc| {
+            let list = match loc {
+                Value::List(l) => l,
+                Value::Nil => {
+                    *loc = Value::List(Vec::new());
+                    match loc {
+                        Value::List(l) => l,
+                        _ => unreachable!(),
+                    }
+                }
+                _ => return Err(Signal::error("push: place is not a list")),
+            };
+            let at = match index {
+                None => 0,
+                Some(i) if i < 0 => (list.len() as i64 + 1 + i).max(0) as usize,
+                Some(i) => (i as usize).min(list.len()),
+            };
+            list.insert(at.min(list.len()), value);
+            Ok(loc.clone())
+        })
     }
 
     fn sf_pop(&self, args: &[Value]) -> Result<Value, Signal> {
         // (pop place [index]) — remove and return an element from a list place.
-        let place = match args.first() {
-            Some(Value::Symbol(id)) => *id,
-            _ => return Err(Signal::error("pop: place must be a symbol")),
-        };
+        let place = self.resolve_place(
+            args.first()
+                .ok_or_else(|| Signal::error("pop: expected a place"))?,
+        )?;
         let index = match args.get(1) {
             Some(e) => match self.eval(e)? {
                 Value::Int(n) => n,
@@ -535,21 +557,85 @@ impl Interp {
             },
             None => 0,
         };
-        let mut list = match self.lookup(place) {
-            Value::List(l) => l,
-            _ => return Err(Signal::error("pop: place is not a list")),
-        };
-        if list.is_empty() {
-            return Ok(Value::Nil);
+        self.with_place_mut(&place, move |loc| {
+            let list = match loc {
+                Value::List(l) => l,
+                _ => return Err(Signal::error("pop: place is not a list")),
+            };
+            if list.is_empty() {
+                return Ok(Value::Nil);
+            }
+            let at = if index < 0 {
+                (list.len() as i64 + index).max(0) as usize
+            } else {
+                (index as usize).min(list.len() - 1)
+            };
+            Ok(list.remove(at))
+        })
+    }
+
+    // ---- place resolution (ORO reference model, ADR-0006) ----------------
+
+    /// Resolve a place expression to a rooted path into a symbol's stored value.
+    /// Supports: `sym`, `(place idx...)` implicit indexing, `(nth i place)`,
+    /// `(first place)`, `(last place)`.
+    fn resolve_place(&self, expr: &Value) -> Result<Place, Signal> {
+        match expr {
+            Value::Symbol(id) => Ok(Place {
+                root: *id,
+                path: Vec::new(),
+            }),
+            Value::List(items) if !items.is_empty() => {
+                if let Value::Symbol(op) = &items[0] {
+                    match self.sym_name(*op).as_str() {
+                        "nth" if items.len() == 3 => {
+                            let i = self.eval_index(&items[1])?;
+                            let mut p = self.resolve_place(&items[2])?;
+                            p.path.push(i);
+                            return Ok(p);
+                        }
+                        "first" if items.len() == 2 => {
+                            let mut p = self.resolve_place(&items[1])?;
+                            p.path.push(0);
+                            return Ok(p);
+                        }
+                        "last" if items.len() == 2 => {
+                            let mut p = self.resolve_place(&items[1])?;
+                            p.path.push(-1);
+                            return Ok(p);
+                        }
+                        _ => {}
+                    }
+                }
+                // Implicit indexing place: (container idx idx ...)
+                let mut p = self.resolve_place(&items[0])?;
+                for idx in &items[1..] {
+                    p.path.push(self.eval_index(idx)?);
+                }
+                Ok(p)
+            }
+            _ => Err(Signal::error("not a valid place")),
         }
-        let at = if index < 0 {
-            (list.len() as i64 + index).max(0) as usize
-        } else {
-            (index as usize).min(list.len() - 1)
-        };
-        let removed = list.remove(at);
-        self.set_global(place, Value::List(list));
-        Ok(removed)
+    }
+
+    fn eval_index(&self, expr: &Value) -> Result<i64, Signal> {
+        match self.eval(expr)? {
+            Value::Int(n) => Ok(n),
+            _ => Err(Signal::error("place index must be an integer")),
+        }
+    }
+
+    /// Mutate the value at a place, creating the root slot if absent.
+    fn with_place_mut<R>(
+        &self,
+        place: &Place,
+        f: impl FnOnce(&mut Value) -> Result<R, Signal>,
+    ) -> Result<R, Signal> {
+        let mut g = self.globals.borrow_mut();
+        let root = g.entry(place.root).or_insert(Value::Nil);
+        let loc = place_navigate(root, &place.path)
+            .ok_or_else(|| Signal::error("place index out of range"))?;
+        f(loc)
     }
 
     fn sf_define(&self, args: &[Value]) -> Result<Value, Signal> {
@@ -752,6 +838,30 @@ impl Default for Interp {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// A location: a root symbol slot plus a path of list indices into it.
+struct Place {
+    root: SymId,
+    path: Vec<i64>,
+}
+
+/// Navigate a mutable value along a path of (possibly negative) list indices.
+fn place_navigate<'a>(root: &'a mut Value, path: &[i64]) -> Option<&'a mut Value> {
+    let mut cur = root;
+    for &raw in path {
+        match cur {
+            Value::List(l) => {
+                let i = if raw < 0 { l.len() as i64 + raw } else { raw };
+                if i < 0 || i as usize >= l.len() {
+                    return None;
+                }
+                cur = &mut l[i as usize];
+            }
+            _ => return None,
+        }
+    }
+    Some(cur)
 }
 
 fn is_int(v: &Value) -> bool {
@@ -994,6 +1104,39 @@ mod tests {
         assert_eq!(as_int(run("(char \"A\")")), 65);
         // 2-byte UTF-8 code point.
         assert_eq!(as_int(run("(length (char 956))")), 2);
+    }
+
+    #[test]
+    fn setf_into_places() {
+        assert_eq!(as_int(run("(set 'L (list 1 2 3)) (setf (L 1) 99) (nth 1 L)")), 99);
+        assert_eq!(as_int(run("(set 'L (list 1 2 3)) (setf (nth 0 L) 7) (first L)")), 7);
+        // Nested list place.
+        let prog = "(set 'M (list (list 1 2) (list 3 4))) (setf (M 1 0) 88) (nth 0 (nth 1 M))";
+        assert_eq!(as_int(run(prog)), 88);
+    }
+
+    #[test]
+    fn inc_push_pop_into_nested_places() {
+        assert_eq!(
+            as_int(run("(set 'L (list 10 20)) (inc (L 1) 5) (nth 1 L)")),
+            25
+        );
+        assert_eq!(
+            as_int(run("(set 'M (list (list 1) (list 2))) (push 9 (M 0) -1) (length (nth 0 M))")),
+            2
+        );
+        assert_eq!(as_int(run("(set 'M (list (list 7 8))) (pop (M 0))")), 7);
+    }
+
+    #[test]
+    fn object_write_back_through_symbol_place() {
+        // The qa-foop `(inc (self 1))` pattern, with an explicit symbol root:
+        // destructive ops on a place write back into the stored object.
+        let prog = "(set 'obj (list 0 (list 0))) \
+                    (inc (obj 0)) \
+                    (inc (obj 1 0)) \
+                    (+ (nth 0 obj) (nth 0 (nth 1 obj)))";
+        assert_eq!(as_int(run(prog)), 2);
     }
 
     #[test]
