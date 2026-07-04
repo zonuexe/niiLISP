@@ -8,7 +8,7 @@ This project is not affiliated with newLISP or Nuevatec. "newLISP" and "Nuevatec
 
 ## Status
 
-Early but usable for small scripts. niiLISP has a reader (three string syntaxes, numbers, quote, comments), a tree-walking evaluator with dynamic scoping and contexts, ORO-style value semantics, FOOP objects with reference `self`, `catch`/`throw`, newLISP's reference/place model for destructive operations, a growing set of builtins (integer and float arithmetic, comparisons, lists, higher-order functions, strings, `format`, bitwise), and a first slice of `import`/FFI for calling C functions (Unix). It passes the vendored `qa-exception` and `qa-foop` suites. Not yet implemented: FFI callbacks and the memory/struct API, networking, bigint, and full UTF-8 character operations. See [`docs/adr/`](docs/adr/) for the design and scope.
+Early but usable for small scripts. niiLISP has a reader (three string syntaxes, numbers, quote, comments), a tree-walking evaluator with dynamic scoping and contexts, ORO-style value semantics, FOOP objects with reference `self`, `catch`/`throw`, newLISP's reference/place model for destructive operations, a growing set of builtins (integer and float arithmetic, comparisons, lists, higher-order functions, strings, `format`, bitwise), and a first slice of `import`/FFI for calling C functions (Unix). It passes the vendored `qa-exception` and `qa-foop` suites. Not yet implemented: the FFI memory/struct API, networking, bigint, and full UTF-8 character operations. The language niiLISP accepts is described in [`docs/spec/syntax.md`](docs/spec/syntax.md); design decisions live under [`docs/adr/`](docs/adr/).
 
 ## Build
 
