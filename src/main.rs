@@ -12,6 +12,7 @@
 
 mod builtins;
 mod eval;
+mod ffi;
 mod printer;
 mod reader;
 mod value;

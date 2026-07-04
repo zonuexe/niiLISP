@@ -28,5 +28,20 @@ exclude = [
 name = "niilisp"
 path = "src/main.rs"
 
+[features]
+default = ["ffi"]
+# `import`/FFI (ADR-0018/0019). Off via --no-default-features for a pure,
+# safe, zero-native-dependency build.
+ffi = ["dep:libloading", "dep:libffi"]
+
+# FFI is Unix-only in the first slice (ADR-0018 revision): it links the system
+# libffi, which is OS-provided on macOS/Linux. On non-Unix targets the `ffi`
+# feature still builds but the FFI code is compiled out (see cfg in src/ffi.rs),
+# so `cargo install` never breaks on Windows.
+[target.'cfg(unix)'.dependencies]
+# dlopen/dlsym + runtime-typed C calls; libffi links the system library.
+libloading = { version = "0.8", optional = true }
+libffi = { version = "3", optional = true, features = ["system"] }
+
 [profile.release]
 opt-level = 3

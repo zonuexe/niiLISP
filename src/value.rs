@@ -40,6 +40,11 @@ pub enum Value {
     Fexpr(Rc<Lambda>),
     /// A primitive function implemented in Rust.
     Builtin(Builtin),
+    /// A C function resolved through `import` (CONTEXT.md: Foreign function).
+    /// The variant is always present; the libffi machinery behind it is gated on
+    /// the `ffi` feature (ADR-0019), so pure builds never construct one.
+    #[cfg_attr(not(all(feature = "ffi", unix)), allow(dead_code))]
+    Foreign(Rc<crate::ffi::ForeignFn>),
 }
 
 /// One formal parameter, with an optional default value (e.g. `(r 0)`).

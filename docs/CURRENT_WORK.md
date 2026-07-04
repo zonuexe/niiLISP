@@ -39,8 +39,12 @@ integration targets unlocked as their dependencies land.
 - **qa-ref tail** — remaining reference-model features: context-as-hash,
   string-byte places (`(setf (s 3) "D")`), `eval`/loop place-returns,
   `upper-case`, `dostring`.
-- **`import` / FFI** (v2 headline, [ADR-0015](adr/0015-import-ffi.md)) — `libloading`
-  + `libffi`, typed import first; unlocks `qa-libffi`, `qa-nullstring`.
+- **`import` / FFI** (v2 headline, [ADR-0015](adr/0015-import-ffi.md)) — first slice
+  **done**: typed `import` of scalar/string/pointer C functions (Unix, system
+  libffi; [ADR-0018](adr/0018-ffi-build-and-packaging.md)/[0019](adr/0019-ffi-first-slice.md)).
+  Next FFI slices: `callback` (libffi closures), the memory API
+  (`pack`/`unpack`/`get-*`/`struct`), simple/untyped `import`, and Windows FFI.
+  `qa-libffi`/`qa-nullstring` also need `exec`/`real-path` and the memory API.
 - **bigint** — `L` literals + `Value::Bigint`; unlocks `qa-bigint`, `qa-longnum`,
   and the tail of `qa-factorfibo`.
 - **Contexts as namespaces/dictionaries** — beyond FOOP; unlocks `qa-dictionary`.
@@ -50,6 +54,15 @@ integration targets unlocked as their dependencies land.
   (`qa-inplace`); would also motivate the `Rc<Lambda>` copy-on-write noted in the
   retrospective.
 - **Networking** — `net-*`; unlocks `qa-lookup6`.
+
+## Release pipeline TODO (before the next tag)
+
+`release.yml` builds prebuilt binaries for 5 platforms with **default features**
+(now including `ffi`). Since FFI uses the *system* libffi and is Unix-only
+(ADR-0018), the current release matrix would fail on Windows and on cross-compiled
+`aarch64-linux`. Before tagging v0.2.0, decide per target: build the prebuilt
+binaries with `--no-default-features` (simplest, drops FFI from downloads but
+`cargo install` still gets it), or install/cross-provide libffi per target.
 
 ## Releasing
 

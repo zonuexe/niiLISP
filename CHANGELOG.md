@@ -6,6 +6,10 @@ All notable changes to niiLISP are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- `import`/FFI, first slice: call C functions from shared libraries with typed signatures — `(import "libm.so" "cos" "double" "double")` then `(cos x)`. Supports `void`, `int`, `long`, `float`, `double`, `char*`, and `void*`; `import` returns `nil` when a library or symbol cannot be resolved. Behind a default-on `ffi` Cargo feature (Unix only for now; `--no-default-features` gives a pure, safe, dependency-free build). Uses the system libffi via `libloading` + `libffi`.
+
 ## [0.1.0] - 2026-07-04
 
 Initial release: a usable command-line interpreter for small newLISP scripts.

@@ -983,5 +983,6 @@ fn type_name(v: &Value) -> &'static str {
         Value::Lambda(_) => "lambda",
         Value::Fexpr(_) => "lambda-macro",
         Value::Builtin(_) => "builtin",
+        Value::Foreign(_) => "foreign",
     }
 }

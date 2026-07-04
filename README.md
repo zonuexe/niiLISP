@@ -8,7 +8,7 @@ This project is not affiliated with newLISP or Nuevatec. "newLISP" and "Nuevatec
 
 ## Status
 
-Early but usable for small scripts. niiLISP has a reader (three string syntaxes, numbers, quote, comments), a tree-walking evaluator with dynamic scoping and contexts, ORO-style value semantics, FOOP objects with reference `self`, `catch`/`throw`, newLISP's reference/place model for destructive operations, and a growing set of builtins (integer and float arithmetic, comparisons, lists, higher-order functions, strings, `format`, bitwise). It passes the vendored `qa-exception` and `qa-foop` suites. Not yet implemented: `import`/FFI, networking, bigint, and full UTF-8 character operations. See [`docs/adr/`](docs/adr/) for the design and scope.
+Early but usable for small scripts. niiLISP has a reader (three string syntaxes, numbers, quote, comments), a tree-walking evaluator with dynamic scoping and contexts, ORO-style value semantics, FOOP objects with reference `self`, `catch`/`throw`, newLISP's reference/place model for destructive operations, a growing set of builtins (integer and float arithmetic, comparisons, lists, higher-order functions, strings, `format`, bitwise), and a first slice of `import`/FFI for calling C functions (Unix). It passes the vendored `qa-exception` and `qa-foop` suites. Not yet implemented: FFI callbacks and the memory/struct API, networking, bigint, and full UTF-8 character operations. See [`docs/adr/`](docs/adr/) for the design and scope.
 
 ## Build
 
@@ -19,6 +19,11 @@ cargo build --release      # binary at target/release/niilisp
 cargo install --path .     # install `niilisp` into ~/.cargo/bin
 cargo test                 # run unit and integration tests
 ```
+
+The default build enables the `ffi` feature (`import`), which links the system
+libffi on Unix — install it if missing (`brew install libffi`, or
+`apt-get install libffi-dev`). For a pure, dependency-free build without `import`,
+use `--no-default-features`. FFI is currently Unix-only.
 
 ## Usage
 

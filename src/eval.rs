@@ -11,7 +11,7 @@ use std::rc::Rc;
 
 use crate::builtins;
 use crate::printer::to_repr;
-use crate::value::{Interner, Lambda, Param, SymId, Value};
+use crate::value::{Builtin, BuiltinFn, Interner, Lambda, Param, SymId, Value};
 
 /// Non-local control flow: `throw` and errors both unwind to the nearest
 /// `catch` (ADR-0011).
@@ -36,6 +36,9 @@ pub struct Interp {
     self_stack: RefCell<Vec<Place>>,
     /// Symbols made read-only by `constant`.
     protected: RefCell<HashSet<SymId>>,
+    /// Loaded shared libraries, kept open for the process lifetime (ADR-0019).
+    #[cfg(all(feature = "ffi", unix))]
+    libs: RefCell<HashMap<String, libloading::Library>>,
 }
 
 /// A dynamic-binding scope. On drop it restores every slot it changed, in
@@ -82,9 +85,40 @@ impl Interp {
             globals: RefCell::new(HashMap::new()),
             self_stack: RefCell::new(Vec::new()),
             protected: RefCell::new(HashSet::new()),
+            #[cfg(all(feature = "ffi", unix))]
+            libs: RefCell::new(HashMap::new()),
         };
         builtins::install(&interp);
+        crate::ffi::install(&interp);
         interp
+    }
+
+    /// Register a primitive under `name`. Used by the FFI module (ADR-0019).
+    #[cfg_attr(not(all(feature = "ffi", unix)), allow(dead_code))]
+    pub fn register_builtin(&self, name: &'static str, func: BuiltinFn) {
+        let id = self.intern(name);
+        self.set_global(id, Value::Builtin(Builtin { name, func }));
+    }
+
+    /// Resolve `name` in the shared library at `path`, loading and caching the
+    /// library (kept open for the process lifetime). `None` if either is missing.
+    #[cfg(all(feature = "ffi", unix))]
+    pub fn ffi_resolve(&self, path: &str, name: &str) -> Option<libffi::middle::CodePtr> {
+        let mut libs = self.libs.borrow_mut();
+        if !libs.contains_key(path) {
+            // SAFETY: loading arbitrary shared libraries is inherently unsafe
+            // (their init code runs); accepted as the nature of FFI (ADR-0015).
+            let lib = unsafe { libloading::Library::new(path).ok()? };
+            libs.insert(path.to_string(), lib);
+        }
+        let lib = libs.get(path)?;
+        let mut symbol = name.as_bytes().to_vec();
+        symbol.push(0);
+        // SAFETY: the library stays loaded for the process lifetime, so the
+        // returned code address remains valid.
+        let sym: libloading::Symbol<unsafe extern "C" fn()> = unsafe { lib.get(&symbol).ok()? };
+        let addr = *sym as usize;
+        Some(libffi::middle::CodePtr(addr as *mut std::ffi::c_void))
     }
 
     pub fn intern(&self, name: &str) -> SymId {
@@ -284,6 +318,7 @@ impl Interp {
             Value::Builtin(b) => (b.func)(self, &args),
             Value::Lambda(l) => self.call_lambda(l, args),
             Value::Fexpr(l) => self.call_lambda(l, args),
+            Value::Foreign(f) => f.call(&args),
             other => Err(Signal::Error(format!(
                 "not a function: {}",
                 self.repr(other)
@@ -306,6 +341,10 @@ impl Interp {
             Value::Fexpr(l) => {
                 let args: Vec<Value> = arg_exprs.to_vec();
                 self.call_lambda(&l, args)
+            }
+            Value::Foreign(f) => {
+                let args = self.eval_args(arg_exprs)?;
+                f.call(&args)
             }
             other => Err(Signal::Error(format!(
                 "not a function: {}",

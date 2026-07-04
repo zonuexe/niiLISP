@@ -39,6 +39,7 @@ pub fn to_repr(v: &Value, it: &Interner) -> String {
         Value::Lambda(l) => format!("(lambda ({} args) ...)", l.params.len()),
         Value::Fexpr(l) => format!("(lambda-macro ({} args) ...)", l.params.len()),
         Value::Builtin(b) => format!("<builtin:{}>", b.name),
+        Value::Foreign(f) => format!("<foreign:{}>", f.name),
     }
 }
 
