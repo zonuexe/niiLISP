@@ -365,7 +365,8 @@ boundary. FFI is Unix-only for now; the memory API (`pack`/`unpack`/`get-*`/
 
 ## 11. Standard functions (overview)
 
-Not exhaustive; a categorised map of the built-in vocabulary.
+Not exhaustive; a categorised map of the built-in vocabulary. For a per-function
+list see [`functions.md`](functions.md).
 
 - **Integer arithmetic** (wrapping): `+ - * / %`.
 - **Float arithmetic**: `add sub mul div`, `sqrt pow exp log`, `sin cos tan
