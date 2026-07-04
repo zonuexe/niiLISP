@@ -90,6 +90,10 @@ pub fn install(interp: &Interp) {
     // I/O and misc.
     reg("time-of-day", time_of_day);
     reg("format", b_format);
+    reg("new", b_new);
+    reg("starts-with", b_starts_with);
+    reg("ends-with", b_ends_with);
+    reg("set-locale", |_, _| Ok(Value::Str(b"C".to_vec())));
     reg("print", b_print);
     reg("println", b_println);
     reg("string", b_string);
@@ -334,6 +338,10 @@ fn values_equal(a: &Value, b: &Value) -> bool {
         (Value::Int(x), Value::Float(y)) | (Value::Float(y), Value::Int(x)) => (*x as f64) == *y,
         (Value::Str(x), Value::Str(y)) => x == y,
         (Value::Symbol(x), Value::Symbol(y)) => x == y,
+        (Value::Context(x), Value::Context(y)) => x == y,
+        // A context and the symbol of the same name compare equal, so FOOP
+        // objects (context-headed) match quoted symbol-headed literals.
+        (Value::Context(x), Value::Symbol(y)) | (Value::Symbol(y), Value::Context(x)) => x == y,
         (Value::List(x), Value::List(y)) => {
             x.len() == y.len() && x.iter().zip(y).all(|(p, q)| values_equal(p, q))
         }
@@ -876,6 +884,33 @@ fn format_one(spec: &str, conv: char, arg: &Value, i: &Interp) -> Result<String,
     }
 }
 
+fn b_new(i: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    // (new prototype 'name) — create a context. Prototype is ignored for now.
+    let name = match args.get(1).or_else(|| args.first()) {
+        Some(Value::Symbol(id)) | Some(Value::Context(id)) => *id,
+        _ => return Err(Signal::error("new: expected a context name symbol")),
+    };
+    i.set_global(name, Value::Context(name));
+    Ok(Value::Context(name))
+}
+
+fn b_starts_with(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    match (args.first(), args.get(1)) {
+        (Some(Value::Str(s)), Some(Value::Str(p))) => Ok(boolean(s.starts_with(p.as_slice()))),
+        (Some(Value::List(l)), Some(pre)) => {
+            Ok(boolean(l.first().is_some_and(|x| values_equal(x, pre))))
+        }
+        _ => Ok(Value::Nil),
+    }
+}
+
+fn b_ends_with(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    match (args.first(), args.get(1)) {
+        (Some(Value::Str(s)), Some(Value::Str(p))) => Ok(boolean(s.ends_with(p.as_slice()))),
+        _ => Ok(Value::Nil),
+    }
+}
+
 fn b_exit(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
     let code = match args.first() {
         Some(Value::Int(n)) => *n as i32,
@@ -892,6 +927,7 @@ fn type_name(v: &Value) -> &'static str {
         Value::Float(_) => "float",
         Value::Str(_) => "string",
         Value::Symbol(_) => "symbol",
+        Value::Context(_) => "context",
         Value::List(_) => "list",
         Value::Lambda(_) => "lambda",
         Value::Fexpr(_) => "lambda-macro",

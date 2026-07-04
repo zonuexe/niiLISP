@@ -25,3 +25,18 @@ fn qa_exception_passes() {
         stdout
     );
 }
+
+#[test]
+fn qa_foop_passes() {
+    let stdout = run_qa("qa-foop");
+    assert!(
+        stdout.contains("FOOP nested 'self' tested SUCCCESSFUL"),
+        "qa-foop nested-self did not pass:\n{}",
+        stdout
+    );
+    assert!(
+        stdout.contains("FOOP symbol protection SUCCESSFUL"),
+        "qa-foop symbol protection did not pass:\n{}",
+        stdout
+    );
+}

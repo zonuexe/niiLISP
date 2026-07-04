@@ -24,6 +24,7 @@ pub fn to_repr(v: &Value, it: &Interner) -> String {
         Value::Float(f) => format_float(*f),
         Value::Str(bytes) => format!("\"{}\"", String::from_utf8_lossy(bytes)),
         Value::Symbol(id) => it.name(*id).to_string(),
+        Value::Context(id) => it.name(*id).to_string(),
         Value::List(items) => {
             let mut out = String::from("(");
             for (i, item) in items.iter().enumerate() {

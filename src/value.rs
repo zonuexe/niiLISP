@@ -32,6 +32,8 @@ pub enum Value {
     Symbol(SymId),
     /// A `Vec`-backed list (ADR-0005). Also the substrate for FOOP objects.
     List(Vec<Value>),
+    /// A context (namespace / FOOP class), named by its symbol (CONTEXT.md: Context).
+    Context(SymId),
     /// A user function: evaluates its arguments.
     Lambda(Rc<Lambda>),
     /// A fexpr / `lambda-macro`: receives its arguments unevaluated (CONTEXT.md: fexpr).
@@ -40,9 +42,15 @@ pub enum Value {
     Builtin(Builtin),
 }
 
+/// One formal parameter, with an optional default value (e.g. `(r 0)`).
+pub struct Param {
+    pub sym: SymId,
+    pub default: Option<Value>,
+}
+
 /// The body of a user-defined lambda or fexpr.
 pub struct Lambda {
-    pub params: Vec<SymId>,
+    pub params: Vec<Param>,
     pub body: Vec<Value>,
 }
 

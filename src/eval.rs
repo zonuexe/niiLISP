@@ -6,12 +6,12 @@
 //! Signal>` (ADR-0011), so error unwinding and scope restoration share one path.
 
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use crate::builtins;
 use crate::printer::to_repr;
-use crate::value::{Interner, Lambda, SymId, Value};
+use crate::value::{Interner, Lambda, Param, SymId, Value};
 
 /// Non-local control flow: `throw` and errors both unwind to the nearest
 /// `catch` (ADR-0011).
@@ -32,6 +32,10 @@ pub struct Interp {
     pub interner: RefCell<Interner>,
     /// The MAIN context's symbol value slots.
     globals: RefCell<HashMap<SymId, Value>>,
+    /// Stack of `self` places for FOOP colon dispatch (ADR-0010).
+    self_stack: RefCell<Vec<Place>>,
+    /// Symbols made read-only by `constant`.
+    protected: RefCell<HashSet<SymId>>,
 }
 
 /// A dynamic-binding scope. On drop it restores every slot it changed, in
@@ -73,6 +77,8 @@ impl Interp {
         let interp = Interp {
             interner: RefCell::new(Interner::default()),
             globals: RefCell::new(HashMap::new()),
+            self_stack: RefCell::new(Vec::new()),
+            protected: RefCell::new(HashSet::new()),
         };
         builtins::install(&interp);
         interp
@@ -128,18 +134,120 @@ impl Interp {
 
         if let Value::Symbol(id) = head {
             let name = self.sym_name(*id);
+            // Colon dispatch: (:method obj args...) (ADR-0010).
+            if let Some(method) = name.strip_prefix(':') {
+                return self.colon_dispatch(method, &items[1..]);
+            }
             if let Some(result) = self.try_special_form(&name, &items[1..]) {
                 return result;
             }
         }
 
         let callable = self.eval(head)?;
-        // Implicit indexing: (i list) or (i count list) when the head is an
-        // integer (newLISP's leading-integer list access).
-        if let Value::Int(i) = callable {
-            return self.implicit_index(i, &items[1..]);
+        match callable {
+            // Implicit indexing: (i list) / (i count list).
+            Value::Int(i) => self.implicit_index(i, &items[1..]),
+            // A list in function position indexes itself: (lst i) / (lst i j).
+            list @ Value::List(_) => {
+                let mut v = list;
+                for idx in &items[1..] {
+                    let i = self.eval_index(idx)?;
+                    v = index_one(i, &v);
+                }
+                Ok(v)
+            }
+            // Default functor: applying a context constructs an object (ADR-0010).
+            Value::Context(ctx) => self.construct(ctx, &items[1..]),
+            other => self.apply(other, &items[1..]),
         }
-        self.apply(callable, &items[1..])
+    }
+
+    // ---- FOOP dispatch (ADR-0010) ----------------------------------------
+
+    /// `(:method obj args...)`: resolve `obj` to a place, dispatch on its class
+    /// tag, and run the method with `self` bound to that place (write-back).
+    fn colon_dispatch(&self, method: &str, args: &[Value]) -> Result<Value, Signal> {
+        let obj_expr = args
+            .first()
+            .ok_or_else(|| Signal::error("colon dispatch: missing object"))?;
+        // Prefer a place (so mutations write back); else stash in a temp slot.
+        let place = match self.resolve_place(obj_expr) {
+            Ok(p) => p,
+            Err(_) => {
+                let v = self.eval(obj_expr)?;
+                let tmp = self.intern("$self-tmp");
+                self.set_global(tmp, v);
+                Place { root: tmp, path: Vec::new() }
+            }
+        };
+        let obj = self.read_place(&place)?;
+        let class = class_of(&obj)
+            .ok_or_else(|| Signal::error("colon dispatch: argument is not a FOOP object"))?;
+        let msym = self.intern(&format!("{}:{}", self.sym_name(class), method));
+        let func = self.lookup(msym);
+
+        // Evaluate method args in the *caller's* self, then bind the new self.
+        let call_args = self.eval_args(&args[1..])?;
+        self.self_stack.borrow_mut().push(place);
+        let result = match func {
+            Value::Lambda(l) => self.call_lambda(&l, call_args),
+            Value::Fexpr(l) => self.call_lambda(&l, call_args),
+            _ => Err(Signal::Error(format!(
+                "no method :{} on {}",
+                method,
+                self.sym_name(class)
+            ))),
+        };
+        self.self_stack.borrow_mut().pop();
+        result
+    }
+
+    /// Applying a context: call its default functor `Ctx:Ctx` if defined, else
+    /// build a symbol-tagged object list.
+    fn construct(&self, ctx: SymId, arg_exprs: &[Value]) -> Result<Value, Signal> {
+        let ctx_name = self.sym_name(ctx);
+        let functor = self.intern(&format!("{}:{}", ctx_name, ctx_name));
+        if let Value::Lambda(l) = self.lookup(functor) {
+            let args = self.eval_args(arg_exprs)?;
+            return self.call_lambda(&l, args);
+        }
+        let mut obj = Vec::with_capacity(arg_exprs.len() + 1);
+        obj.push(Value::Symbol(ctx));
+        for e in arg_exprs {
+            obj.push(self.eval(e)?);
+        }
+        Ok(Value::List(obj))
+    }
+
+    fn current_self(&self) -> Result<Place, Signal> {
+        self.self_stack
+            .borrow()
+            .last()
+            .cloned()
+            .ok_or_else(|| Signal::error("self used outside a method"))
+    }
+
+    fn read_place(&self, place: &Place) -> Result<Value, Signal> {
+        // Reading never triggers write protection (a constant can be read).
+        let mut g = self.globals.borrow_mut();
+        let root = g.entry(place.root).or_insert(Value::Nil);
+        let loc = place_navigate(root, &place.path)
+            .ok_or_else(|| Signal::error("place index out of range"))?;
+        Ok(loc.clone())
+    }
+
+    /// If `name` is context-qualified (`Ctx:member`), ensure the bare context
+    /// symbol evaluates to its Context value.
+    fn ensure_context(&self, qualified: SymId) {
+        let name = self.sym_name(qualified);
+        if let Some((ctx, _)) = name.split_once(':') {
+            if !ctx.is_empty() {
+                let cid = self.intern(ctx);
+                if !matches!(self.lookup(cid), Value::Context(_)) {
+                    self.set_global(cid, Value::Context(cid));
+                }
+            }
+        }
     }
 
     /// `(i list)` -> element i; `(i count list)` -> slice of `count` from `i`.
@@ -203,12 +311,20 @@ impl Interp {
         Ok(args)
     }
 
-    /// Bind parameters (dynamically) and evaluate the body.
+    /// Bind parameters (dynamically) and evaluate the body. Missing arguments
+    /// fall back to the parameter's default (e.g. `(r 0)`), else nil.
     fn call_lambda(&self, l: &Lambda, args: Vec<Value>) -> Result<Value, Signal> {
         let mut scope = Scope::new(self);
         let mut args = args.into_iter();
-        for &p in &l.params {
-            scope.bind(p, args.next().unwrap_or(Value::Nil));
+        for p in &l.params {
+            let v = match args.next() {
+                Some(v) => v,
+                None => match &p.default {
+                    Some(d) => self.eval(d)?,
+                    None => Value::Nil,
+                },
+            };
+            scope.bind(p.sym, v);
         }
         self.eval_body(&l.body)
         // `scope` drops here, restoring the outer bindings.
@@ -243,6 +359,9 @@ impl Interp {
             "set" => self.sf_set(args, true),
             "setq" => self.sf_set(args, false),
             "setf" => self.sf_setf(args),
+            "constant" => self.sf_constant(args),
+            "self" => self.sf_self(args),
+            "time" => self.sf_time(args),
             "let" => self.sf_let(args),
             "lambda" | "fn" => self.sf_lambda(args, false),
             "lambda-macro" => self.sf_lambda(args, true),
@@ -581,10 +700,15 @@ impl Interp {
     /// `(first place)`, `(last place)`.
     fn resolve_place(&self, expr: &Value) -> Result<Place, Signal> {
         match expr {
-            Value::Symbol(id) => Ok(Place {
-                root: *id,
-                path: Vec::new(),
-            }),
+            Value::Symbol(id) => {
+                if self.sym_name(*id) == "self" {
+                    return self.current_self();
+                }
+                Ok(Place {
+                    root: *id,
+                    path: Vec::new(),
+                })
+            }
             Value::List(items) if !items.is_empty() => {
                 if let Value::Symbol(op) = &items[0] {
                     match self.sym_name(*op).as_str() {
@@ -631,6 +755,7 @@ impl Interp {
         place: &Place,
         f: impl FnOnce(&mut Value) -> Result<R, Signal>,
     ) -> Result<R, Signal> {
+        self.check_writable(place.root)?;
         let mut g = self.globals.borrow_mut();
         let root = g.entry(place.root).or_insert(Value::Nil);
         let loc = place_navigate(root, &place.path)
@@ -651,6 +776,7 @@ impl Interp {
                     params,
                     body: args[1..].to_vec(),
                 }));
+                self.ensure_context(fname);
                 self.set_global(fname, lambda.clone());
                 Ok(lambda)
             }
@@ -691,11 +817,49 @@ impl Interp {
                     }
                 }
             };
+            self.check_writable(sym)?;
             last = self.eval(&args[i + 1])?;
             self.set_global(sym, last.clone());
             i += 2;
         }
         Ok(last)
+    }
+
+    fn sf_constant(&self, args: &[Value]) -> Result<Value, Signal> {
+        // (constant 'sym val ...) — like set, but marks the symbol read-only.
+        let mut last = Value::Nil;
+        let mut i = 0;
+        while i + 1 < args.len() {
+            let sym = match self.eval(&args[i])? {
+                Value::Symbol(id) => id,
+                other => {
+                    return Err(Signal::Error(format!(
+                        "constant: target is not a symbol: {}",
+                        self.repr(&other)
+                    )))
+                }
+            };
+            last = self.eval(&args[i + 1])?;
+            self.set_global(sym, last.clone());
+            self.protected.borrow_mut().insert(sym);
+            i += 2;
+        }
+        Ok(last)
+    }
+
+    fn check_writable(&self, sym: SymId) -> Result<(), Signal> {
+        if self.protected.borrow().contains(&sym) {
+            // When the protected symbol is the container of the current `self`,
+            // newLISP names it "container of (self)".
+            let name = if self.self_stack.borrow().last().is_some_and(|p| p.root == sym) {
+                "container of (self)".to_string()
+            } else {
+                self.sym_name(sym)
+            };
+            Err(Signal::Error(format!("ERR: symbol is protected : MAIN:{}", name)))
+        } else {
+            Ok(())
+        }
     }
 
     fn sf_let(&self, args: &[Value]) -> Result<Value, Signal> {
@@ -749,6 +913,26 @@ impl Interp {
         })
     }
 
+    fn sf_self(&self, args: &[Value]) -> Result<Value, Signal> {
+        // (self) -> the current object; (self i j ...) -> nested element.
+        let mut place = self.current_self()?;
+        for a in args {
+            place.path.push(self.eval_index(a)?);
+        }
+        self.read_place(&place)
+    }
+
+    fn sf_time(&self, args: &[Value]) -> Result<Value, Signal> {
+        // (time expr) -> milliseconds spent evaluating expr.
+        use std::time::Instant;
+        let expr = args
+            .first()
+            .ok_or_else(|| Signal::error("time: missing expression"))?;
+        let start = Instant::now();
+        self.eval(expr)?;
+        Ok(Value::Int(start.elapsed().as_millis() as i64))
+    }
+
     fn sf_define_macro(&self, args: &[Value]) -> Result<Value, Signal> {
         // (define-macro (name p1 p2 ...) body...) — a named fexpr (CONTEXT.md: fexpr).
         match args.first() {
@@ -762,6 +946,7 @@ impl Interp {
                     params,
                     body: args[1..].to_vec(),
                 }));
+                self.ensure_context(fname);
                 self.set_global(fname, fx.clone());
                 Ok(fx)
             }
@@ -817,11 +1002,22 @@ impl Interp {
         Err(Signal::Throw(v))
     }
 
-    fn parse_params(&self, forms: &[Value]) -> Result<Vec<SymId>, Signal> {
+    fn parse_params(&self, forms: &[Value]) -> Result<Vec<Param>, Signal> {
         let mut params = Vec::with_capacity(forms.len());
         for f in forms {
             match f {
-                Value::Symbol(id) => params.push(*id),
+                Value::Symbol(id) => params.push(Param {
+                    sym: *id,
+                    default: None,
+                }),
+                // Default-valued parameter: (sym default-expr)
+                Value::List(l) => match l.first() {
+                    Some(Value::Symbol(id)) => params.push(Param {
+                        sym: *id,
+                        default: l.get(1).cloned(),
+                    }),
+                    _ => return Err(Signal::error("parameter: malformed default binding")),
+                },
                 other => {
                     return Err(Signal::Error(format!(
                         "parameter is not a symbol: {}",
@@ -841,9 +1037,21 @@ impl Default for Interp {
 }
 
 /// A location: a root symbol slot plus a path of list indices into it.
+#[derive(Clone)]
 struct Place {
     root: SymId,
     path: Vec<i64>,
+}
+
+/// The class (context) symbol of a FOOP object: the head of its list.
+fn class_of(v: &Value) -> Option<SymId> {
+    match v {
+        Value::List(l) => match l.first() {
+            Some(Value::Symbol(s)) | Some(Value::Context(s)) => Some(*s),
+            _ => None,
+        },
+        _ => None,
+    }
 }
 
 /// Navigate a mutable value along a path of (possibly negative) list indices.
@@ -1137,6 +1345,30 @@ mod tests {
                     (inc (obj 1 0)) \
                     (+ (nth 0 obj) (nth 0 (nth 1 obj)))";
         assert_eq!(as_int(run(prog)), 2);
+    }
+
+    #[test]
+    fn foop_construct_dispatch_and_self_writeback() {
+        // Nested self must write back into the stored object (ADR-0010).
+        let prog = "(new Class 'A) (new Class 'B) \
+                    (setq a (A 0 (B 0))) \
+                    (define (A:m x) (inc (self 1))) \
+                    (define (B:m x) (inc (self 1))) \
+                    (define (A:go) (:m (self) (:m (self 2) \"x\")) (self)) \
+                    (= (:go a) '(A 1 (B 1)))";
+        assert!(matches!(run(prog), Value::True));
+    }
+
+    #[test]
+    fn default_parameters() {
+        assert_eq!(as_int(run("(define (mk (r 0) (i 9)) (+ r i)) (mk 5)")), 14);
+    }
+
+    #[test]
+    fn constant_is_protected() {
+        // Writing a constant errors and leaves the value unchanged.
+        let prog = "(constant 'k 7) (catch (set 'k 9) 'e) k";
+        assert_eq!(as_int(run(prog)), 7);
     }
 
     #[test]
