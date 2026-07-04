@@ -134,7 +134,42 @@ impl Interp {
         }
 
         let callable = self.eval(head)?;
+        // Implicit indexing: (i list) or (i count list) when the head is an
+        // integer (newLISP's leading-integer list access).
+        if let Value::Int(i) = callable {
+            return self.implicit_index(i, &items[1..]);
+        }
         self.apply(callable, &items[1..])
+    }
+
+    /// `(i list)` -> element i; `(i count list)` -> slice of `count` from `i`.
+    fn implicit_index(&self, i: i64, rest: &[Value]) -> Result<Value, Signal> {
+        match rest.len() {
+            1 => {
+                let target = self.eval(&rest[0])?;
+                Ok(index_one(i, &target))
+            }
+            2 => {
+                let count = match self.eval(&rest[0])? {
+                    Value::Int(n) => n,
+                    _ => return Err(Signal::error("implicit slice: count must be an integer")),
+                };
+                let target = self.eval(&rest[1])?;
+                Ok(slice(i, count, &target))
+            }
+            _ => Err(Signal::error("implicit index: expected (i list) or (i count list)")),
+        }
+    }
+
+    /// Call an already-resolved callable with already-evaluated arguments.
+    /// Used by higher-order builtins (`map`, `apply`, `filter`).
+    pub fn call(&self, callable: &Value, args: Vec<Value>) -> Result<Value, Signal> {
+        match callable {
+            Value::Builtin(b) => (b.func)(self, &args),
+            Value::Lambda(l) => self.call_lambda(l, args),
+            Value::Fexpr(l) => self.call_lambda(l, args),
+            other => Err(Signal::Error(format!("not a function: {}", self.repr(other)))),
+        }
     }
 
     /// Apply a callable to unevaluated argument expressions, evaluating them
@@ -196,8 +231,13 @@ impl Interp {
             "when" => self.sf_when(args, true),
             "unless" => self.sf_when(args, false),
             "dotimes" => self.sf_dotimes(args),
-            "++" => self.sf_incr(args, 1),
-            "--" => self.sf_incr(args, -1),
+            "for" => self.sf_for(args),
+            "dolist" => self.sf_dolist(args),
+            "local" => self.sf_local(args),
+            "++" | "inc" => self.sf_incr(args, 1),
+            "--" | "dec" => self.sf_incr(args, -1),
+            "push" => self.sf_push(args),
+            "pop" => self.sf_pop(args),
             "begin" => self.eval_body(args),
             "define" => self.sf_define(args),
             "set" => self.sf_set(args, true),
@@ -339,6 +379,177 @@ impl Interp {
         let next = base.wrapping_add(sign.wrapping_mul(delta));
         self.set_global(sym, Value::Int(next));
         Ok(Value::Int(next))
+    }
+
+    fn sf_for(&self, args: &[Value]) -> Result<Value, Signal> {
+        // (for (var from to [step]) body...) — inclusive; direction auto.
+        let spec = match args.first() {
+            Some(Value::List(s)) if s.len() >= 3 => s,
+            _ => return Err(Signal::error("for: expected (var from to [step])")),
+        };
+        let var = match &spec[0] {
+            Value::Symbol(id) => *id,
+            _ => return Err(Signal::error("for: expected a loop variable")),
+        };
+        let from = self.eval(&spec[1])?;
+        let to = self.eval(&spec[2])?;
+        let step = match spec.get(3) {
+            Some(e) => Some(self.eval(e)?),
+            None => None,
+        };
+
+        let integral = is_int(&from)
+            && is_int(&to)
+            && step.as_ref().map(is_int).unwrap_or(true);
+        let fromf = num(&from)?;
+        let tof = num(&to)?;
+        let stepf = match &step {
+            Some(v) => num(v)?.abs(),
+            None => 1.0,
+        };
+        if stepf == 0.0 {
+            return Err(Signal::error("for: step must be non-zero"));
+        }
+        let ascending = tof >= fromf;
+        let signed = if ascending { stepf } else { -stepf };
+
+        let mut scope = Scope::new(self);
+        scope.bind(var, Value::Nil);
+        let mut result = Value::Nil;
+        let mut v = fromf;
+        while (ascending && v <= tof) || (!ascending && v >= tof) {
+            let bound = if integral {
+                Value::Int(v as i64)
+            } else {
+                Value::Float(v)
+            };
+            self.set_global(var, bound);
+            result = self.eval_body(&args[1..])?;
+            v += signed;
+        }
+        Ok(result)
+    }
+
+    fn sf_dolist(&self, args: &[Value]) -> Result<Value, Signal> {
+        // (dolist (var list [break-cond]) body...)
+        let spec = match args.first() {
+            Some(Value::List(s)) if s.len() >= 2 => s,
+            _ => return Err(Signal::error("dolist: expected (var list)")),
+        };
+        let var = match &spec[0] {
+            Value::Symbol(id) => *id,
+            _ => return Err(Signal::error("dolist: expected a loop variable")),
+        };
+        let items = match self.eval(&spec[1])? {
+            Value::List(l) => l,
+            Value::Nil => Vec::new(),
+            other => {
+                return Err(Signal::Error(format!(
+                    "dolist: expected a list, got {}",
+                    self.repr(&other)
+                )))
+            }
+        };
+        let break_cond = spec.get(2);
+
+        let mut scope = Scope::new(self);
+        scope.bind(var, Value::Nil);
+        let mut result = Value::Nil;
+        for item in items {
+            self.set_global(var, item);
+            if let Some(cond) = break_cond {
+                if self.eval(cond)?.is_truthy() {
+                    break;
+                }
+            }
+            result = self.eval_body(&args[1..])?;
+        }
+        Ok(result)
+    }
+
+    fn sf_local(&self, args: &[Value]) -> Result<Value, Signal> {
+        // (local (a b c) body...) — bind each symbol to nil for the body.
+        let syms = match args.first() {
+            Some(Value::List(s)) => s,
+            _ => return Err(Signal::error("local: expected a symbol list")),
+        };
+        let mut scope = Scope::new(self);
+        for s in syms {
+            match s {
+                Value::Symbol(id) => scope.bind(*id, Value::Nil),
+                _ => return Err(Signal::error("local: expected a symbol")),
+            }
+        }
+        self.eval_body(&args[1..])
+    }
+
+    fn sf_push(&self, args: &[Value]) -> Result<Value, Signal> {
+        // (push value place [index]) — place is a symbol holding a list.
+        if args.len() < 2 {
+            return Err(Signal::error("push: expected (push value place [index])"));
+        }
+        let value = self.eval(&args[0])?;
+        let place = match &args[1] {
+            Value::Symbol(id) => *id,
+            _ => return Err(Signal::error("push: place must be a symbol")),
+        };
+        let index = match args.get(2) {
+            Some(e) => match self.eval(e)? {
+                Value::Int(n) => Some(n),
+                _ => return Err(Signal::error("push: index must be an integer")),
+            },
+            None => None,
+        };
+
+        let mut list = match self.lookup(place) {
+            Value::List(l) => l,
+            Value::Nil => Vec::new(),
+            other => {
+                return Err(Signal::Error(format!(
+                    "push: place is not a list: {}",
+                    self.repr(&other)
+                )))
+            }
+        };
+        let at = match index {
+            None => 0,
+            Some(i) if i < 0 => (list.len() as i64 + 1 + i).max(0) as usize,
+            Some(i) => (i as usize).min(list.len()),
+        };
+        list.insert(at.min(list.len()), value);
+        let result = Value::List(list);
+        self.set_global(place, result.clone());
+        Ok(result)
+    }
+
+    fn sf_pop(&self, args: &[Value]) -> Result<Value, Signal> {
+        // (pop place [index]) — remove and return an element from a list place.
+        let place = match args.first() {
+            Some(Value::Symbol(id)) => *id,
+            _ => return Err(Signal::error("pop: place must be a symbol")),
+        };
+        let index = match args.get(1) {
+            Some(e) => match self.eval(e)? {
+                Value::Int(n) => n,
+                _ => return Err(Signal::error("pop: index must be an integer")),
+            },
+            None => 0,
+        };
+        let mut list = match self.lookup(place) {
+            Value::List(l) => l,
+            _ => return Err(Signal::error("pop: place is not a list")),
+        };
+        if list.is_empty() {
+            return Ok(Value::Nil);
+        }
+        let at = if index < 0 {
+            (list.len() as i64 + index).max(0) as usize
+        } else {
+            (index as usize).min(list.len() - 1)
+        };
+        let removed = list.remove(at);
+        self.set_global(place, Value::List(list));
+        Ok(removed)
     }
 
     fn sf_define(&self, args: &[Value]) -> Result<Value, Signal> {
@@ -543,6 +754,65 @@ impl Default for Interp {
     }
 }
 
+fn is_int(v: &Value) -> bool {
+    matches!(v, Value::Int(_))
+}
+
+fn num(v: &Value) -> Result<f64, Signal> {
+    match v {
+        Value::Int(n) => Ok(*n as f64),
+        Value::Float(f) => Ok(*f),
+        _ => Err(Signal::error("expected a number")),
+    }
+}
+
+/// Element access with newLISP-style negative indexing; out of range -> nil.
+fn index_one(i: i64, target: &Value) -> Value {
+    match target {
+        Value::List(l) => {
+            let idx = if i < 0 { l.len() as i64 + i } else { i };
+            if idx < 0 || idx as usize >= l.len() {
+                Value::Nil
+            } else {
+                l[idx as usize].clone()
+            }
+        }
+        Value::Str(b) => {
+            let idx = if i < 0 { b.len() as i64 + i } else { i };
+            if idx < 0 || idx as usize >= b.len() {
+                Value::Nil
+            } else {
+                Value::Str(vec![b[idx as usize]])
+            }
+        }
+        _ => Value::Nil,
+    }
+}
+
+/// `count` elements starting at `start` (negative start counts from the end).
+fn slice(start: i64, count: i64, target: &Value) -> Value {
+    let take = |len: usize| -> (usize, usize) {
+        let s = if start < 0 {
+            (len as i64 + start).max(0)
+        } else {
+            start.min(len as i64)
+        } as usize;
+        let end = (s as i64 + count.max(0)).min(len as i64) as usize;
+        (s, end)
+    };
+    match target {
+        Value::List(l) => {
+            let (s, e) = take(l.len());
+            Value::List(l[s..e].to_vec())
+        }
+        Value::Str(b) => {
+            let (s, e) = take(b.len());
+            Value::Str(b[s..e].to_vec())
+        }
+        _ => Value::Nil,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -665,6 +935,65 @@ mod tests {
     fn format_subset() {
         assert_eq!(as_str(run("(format \"%d-%d\" 3 7)")), "3-7");
         assert_eq!(as_str(run("(format \"%05.2f\" 3.14159)")), "03.14");
+    }
+
+    #[test]
+    fn for_loop_inclusive_and_directional() {
+        assert_eq!(as_int(run("(set 's 0) (for (i 1 5) (set 's (+ s i))) s")), 15);
+        // Descending when from > to.
+        assert_eq!(as_int(run("(set 's 0) (for (i 5 1) (set 's (+ s 1))) s")), 5);
+    }
+
+    #[test]
+    fn dolist_iterates() {
+        assert_eq!(
+            as_int(run("(set 's 0) (dolist (x (list 2 3 4)) (set 's (+ s x))) s")),
+            9
+        );
+    }
+
+    #[test]
+    fn push_and_pop_symbol_place() {
+        // push at front and at end (-1), then pop from front.
+        assert_eq!(as_int(run("(set 'l (list 2 3)) (push 1 l) (first l)")), 1);
+        assert_eq!(as_int(run("(set 'l (list 1 2)) (push 9 l -1) (last l)")), 9);
+        assert_eq!(as_int(run("(set 'l (list 7 8 9)) (pop l)")), 7);
+    }
+
+    #[test]
+    fn higher_order() {
+        assert_eq!(
+            as_int(run("(apply + (map (lambda (x) (* x x)) (sequence 1 4)))")),
+            30
+        );
+        assert_eq!(
+            as_int(run("(length (filter (lambda (x) (< x 3)) (list 1 2 3 4 5)))")),
+            2
+        );
+    }
+
+    #[test]
+    fn implicit_index_and_slice() {
+        assert_eq!(as_int(run("(2 (list 10 20 30 40))")), 30);
+        // (0 2 list) -> first two elements.
+        assert_eq!(as_int(run("(length (0 2 (list 5 6 7 8)))")), 2);
+    }
+
+    #[test]
+    fn nan_comparisons_are_nil_not_errors() {
+        assert!(matches!(run("(< 1.0 (sqrt -1))"), Value::Nil));
+        assert!(matches!(run("(= (sqrt -1) (sqrt -1))"), Value::Nil));
+        assert!(matches!(run("(NaN? (mod 10 0))"), Value::True));
+        // Saturating int cast: inf assumed as max int.
+        assert_eq!(as_int(run("(* 1 (div 1.0 0))")), i64::MAX);
+    }
+
+    #[test]
+    fn char_roundtrip() {
+        assert_eq!(as_str(run("(char 65)")), "A");
+        assert_eq!(as_int(run("(char \"A\")")), 65);
+        // 2-byte UTF-8 code point.
+        assert_eq!(as_int(run("(length (char 956))")), 2);
     }
 
     #[test]

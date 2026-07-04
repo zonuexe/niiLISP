@@ -23,3 +23,20 @@ Resolves the open item in ADR-0008. The v1 acceptance corpus is the **pure-langu
 - v1 "done" = the In-v1 tests pass. Coverage is legible from that pass rate; deferred areas are tracked, not counted as failures (no silent scope-capping).
 - Because the corpus is newLISP's own suite, the demand-driven builtin set (ADR-0008) is whatever these tests exercise — that list is now concretely derivable by reading the In-v1 files.
 - If a personal `.lsp` corpus appears later, it is added as an additional gate, not a replacement (a new decision).
+
+## Correction (2026-07-04): the qa slice is not cleanly "pure-language"
+
+The In-v1 list above was drawn from test **names**. Reading the actual files shows the `qa-specific-tests` are broad *integration* tests that lean on newLISP's "batteries" even when nominally about one language area, so they do **not** form a clean pure-language gate:
+
+- `qa-factorfibo` — needs **bigint** (`0L`, `bigint`) and **arrays**; belongs with the numeric-tower/array slices, not v1.
+- `qa-nullstring` — is actually an **FFI** edge test (`struct`, `pack`, `unpack`, `get-string` on NULL); v2.
+- `qa-lookup6` — is a **networking** test (`net-lookup`, `net-ipv`); v2.
+- `qa-dictionary` — needs **contexts/namespaces** (`context`, `Ctx` as a dictionary); gated on the Context slice.
+- `qa-float` — mostly pure FP, but its bit-pattern check calls `pack`/`unpack`/`bits`, so it also pulls in FFI-memory primitives before it will run to completion.
+- `qa-inplace`, `qa-ref` — the deepest: they exercise **self-modifying code** (destructively editing a function's own body) plus a large set of destructive place-builtins. They validate the ORO/reference model itself and are late-stage, not near-term.
+
+### Revised acceptance strategy
+
+- **Primary v1 gate = project-authored tests**, not the qa suite: the unit tests in `src/eval.rs` plus small smoke scripts exercise the language core directly and pass/fail cleanly today. These are the real "v1 done" signal.
+- **`qa-specific-tests` become staged integration targets**, each unlocked when its dependencies land (contexts → `qa-dictionary`, `qa-foop`; bigint+arrays → `qa-factorfibo`; FFI → `qa-nullstring`, the tail of `qa-float`; self-modifying + destructive places → `qa-inplace`, `qa-ref`; networking → `qa-lookup6`). `tests/qa.rs` runs each as a subprocess once it is expected to pass; `qa-exception` is the first and currently passes.
+- This supersedes the "In v1 / Deferred" split above, which was name-based and inaccurate.
