@@ -354,11 +354,16 @@ impl Interp {
             "--" | "dec" => self.sf_incr(args, -1),
             "push" => self.sf_push(args),
             "pop" => self.sf_pop(args),
+            "reverse" => self.sf_reverse(args),
+            "sort" => self.sf_sort(args),
+            "rotate" => self.sf_rotate(args),
+            "replace" => self.sf_replace(args),
+            "set-ref" => self.sf_setref(args, false),
+            "set-ref-all" => self.sf_setref(args, true),
             "begin" => self.eval_body(args),
             "define" => self.sf_define(args),
             "set" => self.sf_set(args, true),
-            "setq" => self.sf_set(args, false),
-            "setf" => self.sf_setf(args),
+            "setq" | "setf" => self.sf_setf(args),
             "constant" => self.sf_constant(args),
             "self" => self.sf_self(args),
             "time" => self.sf_time(args),
@@ -509,11 +514,18 @@ impl Interp {
         if args.len() % 2 != 0 {
             return Err(Signal::error("setf: expected place/value pairs"));
         }
+        let it_sym = self.intern("$it");
         let mut last = Value::Nil;
         let mut i = 0;
         while i + 1 < args.len() {
-            let val = self.eval(&args[i + 1])?;
             let place = self.resolve_place(&args[i])?;
+            // Bind `$it` to the place's current value while evaluating the new one.
+            let old = self.read_place(&place)?;
+            let val = {
+                let mut scope = Scope::new(self);
+                scope.bind(it_sym, old);
+                self.eval(&args[i + 1])?
+            };
             let v = val.clone();
             self.with_place_mut(&place, move |loc| {
                 *loc = v;
@@ -693,6 +705,116 @@ impl Interp {
         })
     }
 
+    // ---- destructive, place-aware operations (qa-ref) --------------------
+
+    /// Apply an in-place transform to a place, or to a fresh value if the
+    /// argument is not a place (e.g. the copy returned by `append`).
+    fn place_or_value(
+        &self,
+        target: &Value,
+        op: impl Fn(&mut Value),
+    ) -> Result<Value, Signal> {
+        match self.resolve_place(target) {
+            Ok(place) => self.with_place_mut(&place, |loc| {
+                op(loc);
+                Ok(loc.clone())
+            }),
+            Err(_) => {
+                let mut v = self.eval(target)?;
+                op(&mut v);
+                Ok(v)
+            }
+        }
+    }
+
+    fn sf_reverse(&self, args: &[Value]) -> Result<Value, Signal> {
+        let target = args
+            .first()
+            .ok_or_else(|| Signal::error("reverse: missing argument"))?;
+        self.place_or_value(target, |loc| match loc {
+            Value::List(l) => l.reverse(),
+            Value::Str(b) => b.reverse(),
+            _ => {}
+        })
+    }
+
+    fn sf_rotate(&self, args: &[Value]) -> Result<Value, Signal> {
+        let target = args
+            .first()
+            .ok_or_else(|| Signal::error("rotate: missing argument"))?;
+        let n = match args.get(1) {
+            Some(e) => self.eval_index(e)?,
+            None => 1,
+        };
+        self.place_or_value(target, |loc| rotate_value(loc, n))
+    }
+
+    fn sf_sort(&self, args: &[Value]) -> Result<Value, Signal> {
+        let target = args
+            .first()
+            .ok_or_else(|| Signal::error("sort: missing argument"))?;
+        match self.resolve_place(target) {
+            Ok(place) => self.with_place_mut(&place, |loc| {
+                if let Value::List(l) = loc {
+                    l.sort_by(|a, b| self.value_cmp(a, b));
+                }
+                Ok(loc.clone())
+            }),
+            Err(_) => {
+                let mut v = self.eval(target)?;
+                if let Value::List(l) = &mut v {
+                    l.sort_by(|a, b| self.value_cmp(a, b));
+                }
+                Ok(v)
+            }
+        }
+    }
+
+    fn sf_replace(&self, args: &[Value]) -> Result<Value, Signal> {
+        if args.len() < 3 {
+            return Err(Signal::error("replace: expected (replace target place new)"));
+        }
+        let target = self.eval(&args[0])?;
+        let newval = self.eval(&args[2])?;
+        self.place_or_value(&args[1], |loc| do_replace(loc, &target, &newval))
+    }
+
+    /// A total order over values, for `sort` (symbols compare by name).
+    fn value_cmp(&self, a: &Value, b: &Value) -> std::cmp::Ordering {
+        use std::cmp::Ordering;
+        fn rank(v: &Value) -> u8 {
+            match v {
+                Value::Nil => 0,
+                Value::True => 1,
+                Value::Int(_) | Value::Float(_) => 2,
+                Value::Str(_) => 3,
+                Value::Symbol(_) | Value::Context(_) => 4,
+                Value::List(_) => 5,
+                _ => 6,
+            }
+        }
+        match (a, b) {
+            (Value::Int(_) | Value::Float(_), Value::Int(_) | Value::Float(_)) => {
+                let (x, y) = (num(a).unwrap_or(0.0), num(b).unwrap_or(0.0));
+                x.partial_cmp(&y).unwrap_or(Ordering::Equal)
+            }
+            (Value::Str(x), Value::Str(y)) => x.cmp(y),
+            (Value::Symbol(x), Value::Symbol(y)) => {
+                self.sym_name(*x).cmp(&self.sym_name(*y))
+            }
+            (Value::List(x), Value::List(y)) => {
+                for (p, q) in x.iter().zip(y.iter()) {
+                    let c = self.value_cmp(p, q);
+                    if c != Ordering::Equal {
+                        return c;
+                    }
+                }
+                x.len().cmp(&y.len())
+            }
+            _ => rank(a).cmp(&rank(b)),
+        }
+    }
+
     // ---- place resolution (ORO reference model, ADR-0006) ----------------
 
     /// Resolve a place expression to a rooted path into a symbol's stored value.
@@ -711,6 +833,7 @@ impl Interp {
             }
             Value::List(items) if !items.is_empty() => {
                 if let Value::Symbol(op) = &items[0] {
+                    let rest = &items[1..];
                     match self.sym_name(*op).as_str() {
                         "nth" if items.len() == 3 => {
                             let i = self.eval_index(&items[1])?;
@@ -728,11 +851,61 @@ impl Interp {
                             p.path.push(-1);
                             return Ok(p);
                         }
+                        // Reference-returning control forms (qa-ref): the place
+                        // flows out of the branch that is taken.
+                        "if" => return self.place_if(rest, false),
+                        "if-not" => return self.place_if(rest, true),
+                        "when" => return self.place_guard(rest, true),
+                        "unless" => return self.place_guard(rest, false),
+                        "begin" => return self.place_last(rest),
+                        "and" => return self.place_and(rest),
+                        "or" => return self.place_or(rest),
+                        "cond" => return self.place_cond(rest),
+                        "case" => return self.place_case(rest),
+                        "set" | "setq" | "setf" => return self.place_after_set(rest),
+                        "assoc" if items.len() >= 3 => return self.place_assoc(rest),
+                        // Destructive ops also return a reference to their
+                        // target, so they can be chained: (pop (sort s)).
+                        "reverse" if !rest.is_empty() => {
+                            self.sf_reverse(rest)?;
+                            return self.resolve_place(&rest[0]);
+                        }
+                        "sort" if !rest.is_empty() => {
+                            self.sf_sort(rest)?;
+                            return self.resolve_place(&rest[0]);
+                        }
+                        "rotate" if !rest.is_empty() => {
+                            self.sf_rotate(rest)?;
+                            return self.resolve_place(&rest[0]);
+                        }
+                        "replace" if rest.len() >= 3 => {
+                            self.sf_replace(rest)?;
+                            return self.resolve_place(&rest[1]);
+                        }
+                        "push" if rest.len() >= 2 => {
+                            self.sf_push(rest)?;
+                            return self.resolve_place(&rest[1]);
+                        }
+                        "set-ref" if rest.len() >= 3 => {
+                            self.sf_setref(rest, false)?;
+                            return self.resolve_place(&rest[1]);
+                        }
+                        "set-ref-all" if rest.len() >= 3 => {
+                            self.sf_setref(rest, true)?;
+                            return self.resolve_place(&rest[1]);
+                        }
+                        "lookup" if rest.len() >= 2 => return self.place_lookup(rest),
                         _ => {}
                     }
                 }
-                // Implicit indexing place: (container idx idx ...)
+                // Implicit indexing place: (container idx idx ...). Only valid
+                // when the container is an indexable value (list/string); this
+                // rules out ordinary function calls like (list 1 2 3).
                 let mut p = self.resolve_place(&items[0])?;
+                if items.len() > 1 && !matches!(self.read_place(&p)?, Value::List(_) | Value::Str(_))
+                {
+                    return Err(Signal::error("not an indexable place"));
+                }
                 for idx in &items[1..] {
                     p.path.push(self.eval_index(idx)?);
                 }
@@ -747,6 +920,154 @@ impl Interp {
             Value::Int(n) => Ok(n),
             _ => Err(Signal::error("place index must be an integer")),
         }
+    }
+
+    fn place_last(&self, forms: &[Value]) -> Result<Place, Signal> {
+        // begin: evaluate all but the last, then take the last as the place.
+        if forms.is_empty() {
+            return Err(Signal::error("place: empty body has no reference"));
+        }
+        for f in &forms[..forms.len() - 1] {
+            self.eval(f)?;
+        }
+        self.resolve_place(&forms[forms.len() - 1])
+    }
+
+    fn place_if(&self, args: &[Value], invert: bool) -> Result<Place, Signal> {
+        // (if c then [else]) / (if-not c then [else]) -> place of the taken branch.
+        let cond = self.eval(args.first().ok_or_else(|| Signal::error("if: no condition"))?)?;
+        let taken = if cond.is_truthy() ^ invert {
+            args.get(1)
+        } else {
+            args.get(2)
+        };
+        match taken {
+            Some(e) => self.resolve_place(e),
+            None => Err(Signal::error("if: no reference in the untaken branch")),
+        }
+    }
+
+    fn place_guard(&self, args: &[Value], positive: bool) -> Result<Place, Signal> {
+        // (when c body...) / (unless c body...) -> place of the last body form.
+        let cond = self.eval(args.first().ok_or_else(|| Signal::error("when: no condition"))?)?;
+        if cond.is_truthy() == positive {
+            self.place_last(&args[1..])
+        } else {
+            Err(Signal::error("when/unless: guard false, no reference"))
+        }
+    }
+
+    fn place_and(&self, args: &[Value]) -> Result<Place, Signal> {
+        if args.is_empty() {
+            return Err(Signal::error("and: no reference"));
+        }
+        for a in &args[..args.len() - 1] {
+            if !self.eval(a)?.is_truthy() {
+                return Err(Signal::error("and: short-circuited, no reference"));
+            }
+        }
+        self.resolve_place(&args[args.len() - 1])
+    }
+
+    fn place_or(&self, args: &[Value]) -> Result<Place, Signal> {
+        for a in args {
+            if self.eval(a)?.is_truthy() {
+                return self.resolve_place(a);
+            }
+        }
+        Err(Signal::error("or: no truthy reference"))
+    }
+
+    fn place_cond(&self, clauses: &[Value]) -> Result<Place, Signal> {
+        for clause in clauses {
+            if let Value::List(parts) = clause {
+                if let Some(test) = parts.first() {
+                    if self.eval(test)?.is_truthy() {
+                        return self.place_last(&parts[1..]);
+                    }
+                }
+            }
+        }
+        Err(Signal::error("cond: no clause matched"))
+    }
+
+    fn place_case(&self, args: &[Value]) -> Result<Place, Signal> {
+        let key = self.eval(args.first().ok_or_else(|| Signal::error("case: no key"))?)?;
+        for clause in &args[1..] {
+            if let Value::List(parts) = clause {
+                if let Some(label) = parts.first() {
+                    let matches = matches!(label, Value::Symbol(s) if self.sym_name(*s) == "true")
+                        || crate::builtins::values_equal(label, &key);
+                    if matches {
+                        return self.place_last(&parts[1..]);
+                    }
+                }
+            }
+        }
+        Err(Signal::error("case: no clause matched"))
+    }
+
+    fn place_after_set(&self, args: &[Value]) -> Result<Place, Signal> {
+        // (setq place val ...) / (set 'sym val ...) evaluated for its effect;
+        // the reference is the last assigned place.
+        self.sf_setf(args)?;
+        self.resolve_place(args.first().ok_or_else(|| Signal::error("set: no target"))?)
+    }
+
+    fn sf_setref(&self, args: &[Value], all: bool) -> Result<Value, Signal> {
+        // (set-ref key place new) — deep-replace key with new in the place.
+        let key = self.eval(&args[0])?;
+        let new = self.eval(&args[2])?;
+        self.place_or_value(&args[1], |loc| {
+            deep_replace(loc, &key, &new, all);
+        })
+    }
+
+    fn place_lookup(&self, args: &[Value]) -> Result<Place, Signal> {
+        // (lookup key assoc-list [index]) -> reference to the matched element.
+        let key = self.eval(&args[0])?;
+        let mut place = self.resolve_place(&args[1])?;
+        let idx = match args.get(2) {
+            Some(e) => self.eval_index(e)?,
+            None => -1,
+        };
+        if let Value::List(items) = self.read_place(&place)? {
+            for (i, item) in items.iter().enumerate() {
+                if let Value::List(pair) = item {
+                    if pair
+                        .first()
+                        .is_some_and(|k| crate::builtins::values_equal(k, &key))
+                    {
+                        place.path.push(i as i64);
+                        place.path.push(idx);
+                        return Ok(place);
+                    }
+                }
+            }
+        }
+        Err(Signal::error("lookup: key not found"))
+    }
+
+    fn place_assoc(&self, args: &[Value]) -> Result<Place, Signal> {
+        // (assoc key place) -> reference to the matching (key ...) sub-list.
+        let key = self.eval(&args[0])?;
+        let place = self.resolve_place(&args[1])?;
+        let list = self.read_place(&place)?;
+        if let Value::List(items) = list {
+            for (i, item) in items.iter().enumerate() {
+                if let Value::List(pair) = item {
+                    if pair
+                        .first()
+                        .is_some_and(|k| crate::builtins::values_equal(k, &key))
+                    {
+                        let mut p = place;
+                        p.path.push(i as i64);
+                        return Ok(p);
+                    }
+                }
+            }
+        }
+        Err(Signal::error("assoc: key not found"))
     }
 
     /// Mutate the value at a place, creating the root slot if absent.
@@ -1072,6 +1393,79 @@ fn place_navigate<'a>(root: &'a mut Value, path: &[i64]) -> Option<&'a mut Value
     Some(cur)
 }
 
+/// Rotate a list/string in place: positive `n` moves the tail to the front.
+fn rotate_value(v: &mut Value, n: i64) {
+    match v {
+        Value::List(l) if !l.is_empty() => {
+            let len = l.len() as i64;
+            let k = (((n % len) + len) % len) as usize;
+            l.rotate_right(k);
+        }
+        Value::Str(b) if !b.is_empty() => {
+            let len = b.len() as i64;
+            let k = (((n % len) + len) % len) as usize;
+            b.rotate_right(k);
+        }
+        _ => {}
+    }
+}
+
+/// Replace occurrences of `target` with `newval` inside `loc`, in place.
+fn do_replace(loc: &mut Value, target: &Value, newval: &Value) {
+    match loc {
+        Value::List(l) => {
+            for e in l.iter_mut() {
+                if crate::builtins::values_equal(e, target) {
+                    *e = newval.clone();
+                }
+            }
+        }
+        Value::Str(b) => {
+            if let (Value::Str(t), Value::Str(n)) = (target, newval) {
+                *b = replace_bytes(b, t, n);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Deep-replace occurrences of `key` with `new` within nested lists. With
+/// `all == false`, stops after the first replacement. Returns whether it did.
+fn deep_replace(v: &mut Value, key: &Value, new: &Value, all: bool) -> bool {
+    if let Value::List(l) = v {
+        for e in l.iter_mut() {
+            if crate::builtins::values_equal(e, key) {
+                *e = new.clone();
+                if !all {
+                    return true;
+                }
+            } else if deep_replace(e, key, new, all) && !all {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Replace all non-overlapping occurrences of `needle` with `to` in `hay`.
+fn replace_bytes(hay: &[u8], needle: &[u8], to: &[u8]) -> Vec<u8> {
+    if needle.is_empty() {
+        return hay.to_vec();
+    }
+    let mut out = Vec::with_capacity(hay.len());
+    let mut i = 0;
+    while i < hay.len() {
+        if hay[i..].starts_with(needle) {
+            out.extend_from_slice(to);
+            i += needle.len();
+        } else {
+            out.push(hay[i]);
+            i += 1;
+        }
+    }
+    out
+}
+
 fn is_int(v: &Value) -> bool {
     matches!(v, Value::Int(_))
 }
@@ -1369,6 +1763,56 @@ mod tests {
         // Writing a constant errors and leaves the value unchanged.
         let prog = "(constant 'k 7) (catch (set 'k 9) 'e) k";
         assert_eq!(as_int(run(prog)), 7);
+    }
+
+    fn is_true(src: &str) -> bool {
+        matches!(run(src), Value::True)
+    }
+
+    #[test]
+    fn reference_returning_control_forms() {
+        // A place flows out of the taken branch, so destructive ops reach it.
+        assert!(is_true("(set 'l '((a b) c)) (pop (if true (l 0) '(x))) (= l '((b) c))"));
+        assert!(is_true("(set 'L '(a b c)) (pop (case 1 (1 L))) (= L '(b c))"));
+        assert!(is_true(
+            "(set 'L '(a b c)) (pop (cond (nil 1) (true L))) (= L '(b c))"
+        ));
+    }
+
+    #[test]
+    fn place_aware_setq_and_it() {
+        assert!(is_true("(set 'l '(a b c)) (setq (first l) 99) (= l '(99 b c))"));
+        assert!(is_true(
+            "(set 'l '((a 1) (b 2))) (setq (assoc 'b l) '(b 3)) (= l '((a 1) (b 3)))"
+        ));
+        assert_eq!(as_int(run("(setf y 1) (setf y (+ $it 1))")), 2);
+    }
+
+    #[test]
+    fn destructive_ops_write_back_through_references() {
+        assert!(is_true(
+            "(set 'L '(a b (c d e f g))) (replace 'f (nth 2 L) 'z) (= L '(a b (c d e z g)))"
+        ));
+        assert!(is_true(
+            "(set 'r '(A B D E F G)) (replace 'D (rotate r) 'Z) (= r '(G A B Z E F))"
+        ));
+        assert!(is_true(
+            "(set 's '(K U Q A J P T)) (pop (sort s)) (= s '(J K P Q T U))"
+        ));
+        assert!(is_true(
+            "(set 'l '(A B C D E F)) (push 'D (reverse l)) (= l '(D F E D C B A))"
+        ));
+    }
+
+    #[test]
+    fn set_ref_and_lookup_references() {
+        assert!(is_true(
+            "(set 'l '(\"AA\" (\"BB\" \"CC\"))) (pop (set-ref \"BB\" l \"aa\")) (= l '((\"aa\" \"CC\")))"
+        ));
+        assert!(is_true(
+            "(set 'L '((a 1) (b 1 (2 3) 4) (c 3))) (push 99 (lookup 'b L -2)) \
+             (= L '((a 1) (b 1 (99 2 3) 4) (c 3)))"
+        ));
     }
 
     #[test]

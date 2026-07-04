@@ -61,7 +61,6 @@ pub fn install(interp: &Interp) {
     reg("nth", b_nth);
     reg("length", b_length);
     reg("append", b_append);
-    reg("reverse", b_reverse);
     reg("sequence", b_sequence);
     reg("map", b_map);
     reg("apply", b_apply);
@@ -90,6 +89,8 @@ pub fn install(interp: &Interp) {
     // I/O and misc.
     reg("time-of-day", time_of_day);
     reg("format", b_format);
+    reg("lookup", b_lookup);
+    reg("assoc", b_assoc);
     reg("new", b_new);
     reg("starts-with", b_starts_with);
     reg("ends-with", b_ends_with);
@@ -330,7 +331,7 @@ fn b_abs(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
 
 // ---- comparison ----------------------------------------------------------
 
-fn values_equal(a: &Value, b: &Value) -> bool {
+pub fn values_equal(a: &Value, b: &Value) -> bool {
     match (a, b) {
         (Value::Nil, Value::Nil) | (Value::True, Value::True) => true,
         (Value::Int(x), Value::Int(y)) => x == y,
@@ -481,6 +482,16 @@ fn b_length(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
 }
 
 fn b_append(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    // Strings concatenate; lists concatenate. `append` always returns a copy.
+    if args.iter().all(|a| matches!(a, Value::Str(_))) {
+        let mut out = Vec::new();
+        for a in args {
+            if let Value::Str(b) = a {
+                out.extend_from_slice(b);
+            }
+        }
+        return Ok(Value::Str(out));
+    }
     let mut out = Vec::new();
     for a in args {
         match a {
@@ -494,22 +505,6 @@ fn b_append(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
         }
     }
     Ok(Value::List(out))
-}
-
-fn b_reverse(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
-    match args.first() {
-        Some(Value::List(l)) => {
-            let mut v = l.clone();
-            v.reverse();
-            Ok(Value::List(v))
-        }
-        Some(Value::Str(b)) => {
-            let mut v = b.clone();
-            v.reverse();
-            Ok(Value::Str(v))
-        }
-        _ => Err(Signal::error("reverse: expected a list or string")),
-    }
 }
 
 // ---- higher-order and sequence ------------------------------------------
@@ -882,6 +877,48 @@ fn format_one(spec: &str, conv: char, arg: &Value, i: &Interp) -> Result<String,
     } else {
         Ok(format!("{}{}", " ".repeat(pad), body))
     }
+}
+
+fn b_assoc(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    // (assoc key alist) -> the (key ...) pair, or nil.
+    let key = args.first().unwrap_or(&Value::Nil);
+    if let Some(Value::List(items)) = args.get(1) {
+        for item in items {
+            if let Value::List(pair) = item {
+                if pair.first().is_some_and(|k| values_equal(k, key)) {
+                    return Ok(item.clone());
+                }
+            }
+        }
+    }
+    Ok(Value::Nil)
+}
+
+fn b_lookup(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    // (lookup key alist [index]) -> element `index` of the matched pair.
+    let key = args.first().unwrap_or(&Value::Nil);
+    let idx = match args.get(2) {
+        Some(Value::Int(n)) => *n,
+        _ => -1,
+    };
+    if let Some(Value::List(items)) = args.get(1) {
+        for item in items {
+            if let Value::List(pair) = item {
+                if pair.first().is_some_and(|k| values_equal(k, key)) {
+                    let i = if idx < 0 {
+                        pair.len() as i64 + idx
+                    } else {
+                        idx
+                    };
+                    if i >= 0 && (i as usize) < pair.len() {
+                        return Ok(pair[i as usize].clone());
+                    }
+                    return Ok(Value::Nil);
+                }
+            }
+        }
+    }
+    Ok(Value::Nil)
 }
 
 fn b_new(i: &Interp, args: &[Value]) -> Result<Value, Signal> {
