@@ -193,6 +193,11 @@ impl Interp {
             "and" => self.sf_and(args),
             "or" => self.sf_or(args),
             "while" => self.sf_while(args),
+            "when" => self.sf_when(args, true),
+            "unless" => self.sf_when(args, false),
+            "dotimes" => self.sf_dotimes(args),
+            "++" => self.sf_incr(args, 1),
+            "--" => self.sf_incr(args, -1),
             "begin" => self.eval_body(args),
             "define" => self.sf_define(args),
             "set" => self.sf_set(args, true),
@@ -270,6 +275,70 @@ impl Interp {
             result = self.eval_body(&args[1..])?;
         }
         Ok(result)
+    }
+
+    fn sf_when(&self, args: &[Value], positive: bool) -> Result<Value, Signal> {
+        let cond = args
+            .first()
+            .ok_or_else(|| Signal::error("when/unless: missing condition"))?;
+        if self.eval(cond)?.is_truthy() == positive {
+            self.eval_body(&args[1..])
+        } else {
+            Ok(Value::Nil)
+        }
+    }
+
+    fn sf_dotimes(&self, args: &[Value]) -> Result<Value, Signal> {
+        // (dotimes (var count) body...)
+        let spec = match args.first() {
+            Some(Value::List(s)) => s,
+            _ => return Err(Signal::error("dotimes: expected (var count)")),
+        };
+        let var = match spec.first() {
+            Some(Value::Symbol(id)) => *id,
+            _ => return Err(Signal::error("dotimes: expected a loop variable")),
+        };
+        let count = match self.eval(spec.get(1).unwrap_or(&Value::Nil))? {
+            Value::Int(n) => n,
+            Value::Float(f) => f as i64,
+            _ => return Err(Signal::error("dotimes: count must be a number")),
+        };
+
+        let mut scope = Scope::new(self);
+        scope.bind(var, Value::Int(0));
+        let mut result = Value::Nil;
+        let mut i = 0;
+        while i < count {
+            self.set_global(var, Value::Int(i));
+            result = self.eval_body(&args[1..])?;
+            i += 1;
+        }
+        Ok(result)
+    }
+
+    fn sf_incr(&self, args: &[Value], sign: i64) -> Result<Value, Signal> {
+        // (++ sym [amount]) / (-- sym [amount]) — mutate a symbol in place.
+        let sym = match args.first() {
+            Some(Value::Symbol(id)) => *id,
+            _ => return Err(Signal::error("++/--: expected a symbol")),
+        };
+        let delta = match args.get(1) {
+            Some(e) => match self.eval(e)? {
+                Value::Int(n) => n,
+                Value::Float(f) => f as i64,
+                _ => return Err(Signal::error("++/--: amount must be a number")),
+            },
+            None => 1,
+        };
+        let base = match self.lookup(sym) {
+            Value::Int(n) => n,
+            Value::Nil => 0,
+            Value::Float(f) => f as i64,
+            _ => return Err(Signal::error("++/--: symbol is not a number")),
+        };
+        let next = base.wrapping_add(sign.wrapping_mul(delta));
+        self.set_global(sym, Value::Int(next));
+        Ok(Value::Int(next))
     }
 
     fn sf_define(&self, args: &[Value]) -> Result<Value, Signal> {
@@ -511,6 +580,13 @@ mod tests {
         }
     }
 
+    fn as_str(v: Value) -> String {
+        match v {
+            Value::Str(b) => String::from_utf8_lossy(&b).into_owned(),
+            _ => panic!("expected Str, got a different value type"),
+        }
+    }
+
     #[test]
     fn integer_arithmetic_wraps() {
         assert_eq!(as_int(run("(+ 1 2 3)")), 6);
@@ -563,6 +639,32 @@ mod tests {
         assert_eq!(as_int(run("(length (list 1 2 3 4))")), 4);
         assert_eq!(as_int(run("(first (cons 5 (list 6 7)))")), 5);
         assert_eq!(as_int(run("(nth 1 (list 10 20 30))")), 20);
+    }
+
+    #[test]
+    fn incr_and_dotimes() {
+        assert_eq!(as_int(run("(set 'c 0) (dotimes (i 5) (++ c)) c")), 5);
+        assert_eq!(as_int(run("(set 'n 10) (-- n 3) n")), 7);
+    }
+
+    #[test]
+    fn when_and_unless() {
+        assert_eq!(as_int(run("(when (< 1 2) 41 42)")), 42);
+        assert!(matches!(run("(when nil 1)"), Value::Nil));
+        assert_eq!(as_int(run("(unless nil 99)")), 99);
+    }
+
+    #[test]
+    fn bitwise() {
+        assert_eq!(as_int(run("(& 6 3)")), 2);
+        assert_eq!(as_int(run("(| 4 1)")), 5);
+        assert_eq!(as_int(run("(<< 1 4)")), 16);
+    }
+
+    #[test]
+    fn format_subset() {
+        assert_eq!(as_str(run("(format \"%d-%d\" 3 7)")), "3-7");
+        assert_eq!(as_str(run("(format \"%05.2f\" 3.14159)")), "03.14");
     }
 
     #[test]

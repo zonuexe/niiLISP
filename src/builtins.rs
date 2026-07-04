@@ -62,7 +62,15 @@ pub fn install(interp: &Interp) {
     reg("empty?", is_empty);
     reg("not", b_not);
     reg("eval", b_eval);
+    // Bitwise.
+    reg("&", bit_and);
+    reg("|", bit_or);
+    reg("^", bit_xor);
+    reg("<<", shl);
+    reg(">>", shr);
     // I/O and misc.
+    reg("time-of-day", time_of_day);
+    reg("format", b_format);
     reg("print", b_print);
     reg("println", b_println);
     reg("string", b_string);
@@ -493,6 +501,182 @@ fn b_string(i: &Interp, args: &[Value]) -> Result<Value, Signal> {
         }
     }
     Ok(Value::Str(out))
+}
+
+// ---- bitwise -------------------------------------------------------------
+
+fn bit_and(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    let mut acc: i64 = -1;
+    for a in args {
+        acc &= to_i64(a)?;
+    }
+    Ok(Value::Int(acc))
+}
+fn bit_or(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    let mut acc: i64 = 0;
+    for a in args {
+        acc |= to_i64(a)?;
+    }
+    Ok(Value::Int(acc))
+}
+fn bit_xor(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    let mut acc: i64 = 0;
+    for a in args {
+        acc ^= to_i64(a)?;
+    }
+    Ok(Value::Int(acc))
+}
+fn shl(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    if args.len() != 2 {
+        return Err(Signal::error("<<: expected 2 arguments"));
+    }
+    Ok(Value::Int(to_i64(&args[0])?.wrapping_shl(to_i64(&args[1])? as u32)))
+}
+fn shr(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    if args.len() != 2 {
+        return Err(Signal::error(">>: expected 2 arguments"));
+    }
+    Ok(Value::Int(to_i64(&args[0])?.wrapping_shr(to_i64(&args[1])? as u32)))
+}
+
+fn time_of_day(_: &Interp, _: &[Value]) -> Result<Value, Signal> {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+    Ok(Value::Int(ms))
+}
+
+// ---- format (printf subset) ---------------------------------------------
+
+fn b_format(i: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    let fmt = match args.first() {
+        Some(Value::Str(b)) => b.clone(),
+        _ => return Err(Signal::error("format: first argument must be a string")),
+    };
+    let mut out = Vec::new();
+    let mut argi = 1usize;
+    let mut k = 0usize;
+    while k < fmt.len() {
+        let c = fmt[k];
+        if c != b'%' {
+            out.push(c);
+            k += 1;
+            continue;
+        }
+        // Collect the conversion spec: %[flags][width][.prec]conv
+        let mut spec = String::from("%");
+        k += 1;
+        if k < fmt.len() && fmt[k] == b'%' {
+            out.push(b'%');
+            k += 1;
+            continue;
+        }
+        let mut conv = None;
+        while k < fmt.len() {
+            let ch = fmt[k] as char;
+            spec.push(ch);
+            k += 1;
+            if "diouxXeEfFgGsc".contains(ch) {
+                conv = Some(ch);
+                break;
+            }
+        }
+        let conv = conv.ok_or_else(|| Signal::error("format: incomplete conversion"))?;
+        let arg = args.get(argi).cloned().unwrap_or(Value::Nil);
+        argi += 1;
+        out.extend_from_slice(format_one(&spec, conv, &arg, i)?.as_bytes());
+    }
+    Ok(Value::Str(out))
+}
+
+fn format_one(spec: &str, conv: char, arg: &Value, i: &Interp) -> Result<String, Signal> {
+    let inner = &spec[1..spec.len() - 1]; // between '%' and the conversion char
+    let mut chars = inner.chars().peekable();
+    let (mut left, mut zero, mut plus, mut space) = (false, false, false, false);
+    while let Some(&c) = chars.peek() {
+        match c {
+            '-' => left = true,
+            '0' => zero = true,
+            '+' => plus = true,
+            ' ' => space = true,
+            _ => break,
+        }
+        chars.next();
+    }
+    let mut width = String::new();
+    while let Some(&c) = chars.peek() {
+        if c.is_ascii_digit() {
+            width.push(c);
+            chars.next();
+        } else {
+            break;
+        }
+    }
+    let width: usize = width.parse().unwrap_or(0);
+    let mut prec = None;
+    if let Some(&'.') = chars.peek() {
+        chars.next();
+        let mut p = String::new();
+        while let Some(&c) = chars.peek() {
+            if c.is_ascii_digit() {
+                p.push(c);
+                chars.next();
+            } else {
+                break;
+            }
+        }
+        prec = Some(p.parse::<usize>().unwrap_or(0));
+    }
+
+    let body = match conv {
+        'd' | 'i' | 'u' => {
+            let n = to_i64(arg)?;
+            if n < 0 {
+                format!("-{}", n.unsigned_abs())
+            } else if plus {
+                format!("+{}", n)
+            } else if space {
+                format!(" {}", n)
+            } else {
+                n.to_string()
+            }
+        }
+        'f' | 'F' => format!("{:.*}", prec.unwrap_or(6), to_f64(arg)?),
+        'e' | 'E' => format!("{:.*e}", prec.unwrap_or(6), to_f64(arg)?),
+        'g' | 'G' => format!("{}", to_f64(arg)?),
+        'x' => format!("{:x}", to_i64(arg)?),
+        'X' => format!("{:X}", to_i64(arg)?),
+        'o' => format!("{:o}", to_i64(arg)?),
+        'c' => ((to_i64(arg)? as u8) as char).to_string(),
+        's' => {
+            let s = match arg {
+                Value::Str(b) => String::from_utf8_lossy(b).into_owned(),
+                other => to_display(other, &i.interner.borrow()),
+            };
+            match prec {
+                Some(p) => s.chars().take(p).collect(),
+                None => s,
+            }
+        }
+        _ => return Err(Signal::error("format: unsupported conversion")),
+    };
+
+    if body.len() >= width {
+        return Ok(body);
+    }
+    let pad = width - body.len();
+    if left {
+        Ok(format!("{}{}", body, " ".repeat(pad)))
+    } else if zero && !matches!(conv, 's' | 'c') {
+        match body.strip_prefix('-') {
+            Some(rest) => Ok(format!("-{}{}", "0".repeat(pad), rest)),
+            None => Ok(format!("{}{}", "0".repeat(pad), body)),
+        }
+    } else {
+        Ok(format!("{}{}", " ".repeat(pad), body))
+    }
 }
 
 fn b_exit(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
