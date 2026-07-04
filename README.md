@@ -6,6 +6,40 @@ niiLISP aims to reproduce newLISP's language semantics faithfully, including its
 
 This project is not affiliated with newLISP or Nuevatec. "newLISP" and "Nuevatec" are trademarks of Lutz Mueller.
 
+## Status
+
+Early but usable for small scripts. niiLISP has a reader (three string syntaxes, numbers, quote, comments), a tree-walking evaluator with dynamic scoping and contexts, ORO-style value semantics, FOOP objects with reference `self`, `catch`/`throw`, newLISP's reference/place model for destructive operations, and a growing set of builtins (integer and float arithmetic, comparisons, lists, higher-order functions, strings, `format`, bitwise). It passes the vendored `qa-exception` and `qa-foop` suites. Not yet implemented: `import`/FFI, networking, bigint, and full UTF-8 character operations. See [`docs/adr/`](docs/adr/) for the design and scope.
+
+## Build
+
+niiLISP is written in Rust and needs a recent stable toolchain (2021 edition).
+
+```
+cargo build --release      # binary at target/release/niilisp
+cargo install --path .     # install `niilisp` into ~/.cargo/bin
+cargo test                 # run unit and integration tests
+```
+
+## Usage
+
+```
+niilisp script.lsp              # run a script file
+niilisp -e '(println (+ 1 2))'  # evaluate an expression
+echo '(println 42)' | niilisp - # read a script from stdin
+niilisp                         # start an interactive REPL
+niilisp --help                  # print usage
+```
+
+## Examples
+
+Runnable scripts live in [`examples/`](examples/):
+
+```
+niilisp examples/hello.lsp
+niilisp examples/fib.lsp
+niilisp examples/foop.lsp
+```
+
 ## Copyright
 
 ```
