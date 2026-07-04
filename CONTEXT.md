@@ -24,6 +24,10 @@ _Avoid_: "FFI compat" (use this precise term), "C compat"
 A C-callable function pointer, created by `(callback 'lisp-func …)`, that trampolines into a niiLISP function so C libraries can call back into Lisp (e.g. GLUT display/idle handlers). Implemented with libffi closures.
 _Avoid_: "hook", "handler", "function pointer" (bare)
 
+**Foreign function**:
+A niiLISP value that wraps a C function resolved through `import`: the resolved code pointer plus its declared argument and return types. It is callable like any other function, and `import` binds it under the C function's name.
+_Avoid_: "native function" (reserved for newLISP's cell-ABI extensions), "external function"
+
 **Module (newLISP sense)**:
 A newLISP `.lsp` file that exposes functionality, usually by calling into an external shared library via `import`. The dominant real-world form of newLISP "module". Distinct from a native C extension that links against newLISP's own cell ABI.
 _Avoid_: "library", "package", "plugin"
