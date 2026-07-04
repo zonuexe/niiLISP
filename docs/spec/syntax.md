@@ -88,7 +88,7 @@ colon-form  ::= ":" name                   ; e.g. :area  (colon dispatch, §7)
 
 ## 2. Values
 
-The value types are:
+The value types are (per-type detail in [`types.md`](types.md)):
 
 | Type      | Examples / notes |
 | --------- | ---------------- |
