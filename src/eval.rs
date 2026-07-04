@@ -398,7 +398,9 @@ impl Interp {
         let r = match name {
             "quote" => Ok(args.first().cloned().unwrap_or(Value::Nil)),
             "if" => self.sf_if(args),
+            "if-not" => self.sf_if_not(args),
             "cond" => self.sf_cond(args),
+            "case" => self.sf_case(args),
             "and" => self.sf_and(args),
             "or" => self.sf_or(args),
             "while" => self.sf_while(args),
@@ -453,6 +455,22 @@ impl Interp {
         }
     }
 
+    fn sf_if_not(&self, args: &[Value]) -> Result<Value, Signal> {
+        // (if-not cond then [else]) — the inverse of the two/three-arg `if`.
+        let cond = self.eval(
+            args.first()
+                .ok_or_else(|| Signal::error("if-not: no condition"))?,
+        )?;
+        if !cond.is_truthy() {
+            self.eval(args.get(1).unwrap_or(&Value::Nil))
+        } else {
+            match args.get(2) {
+                Some(e) => self.eval(e),
+                None => Ok(Value::Nil),
+            }
+        }
+    }
+
     fn sf_cond(&self, args: &[Value]) -> Result<Value, Signal> {
         for clause in args {
             if let Value::List(parts) = clause {
@@ -466,6 +484,31 @@ impl Interp {
             }
         }
         Ok(Value::Nil)
+    }
+
+    fn sf_case(&self, args: &[Value]) -> Result<Value, Signal> {
+        // (case key (label body...) ... (true default...)) — labels are literal.
+        let key = self.eval(args.first().ok_or_else(|| Signal::error("case: no key"))?)?;
+        for clause in &args[1..] {
+            if let Value::List(parts) = clause {
+                if let Some(label) = parts.first() {
+                    if self.case_label_matches(label, &key) {
+                        return self.eval_body(&parts[1..]);
+                    }
+                }
+            }
+        }
+        Ok(Value::Nil)
+    }
+
+    /// Whether a `case` clause label matches the key. `true`/`t` is the default.
+    fn case_label_matches(&self, label: &Value, key: &Value) -> bool {
+        matches!(label, Value::True)
+            || matches!(label, Value::Symbol(s) if {
+                let n = self.sym_name(*s);
+                n == "true" || n == "t"
+            })
+            || crate::builtins::values_equal(label, key)
     }
 
     fn sf_and(&self, args: &[Value]) -> Result<Value, Signal> {
@@ -1055,9 +1098,7 @@ impl Interp {
         for clause in &args[1..] {
             if let Value::List(parts) = clause {
                 if let Some(label) = parts.first() {
-                    let matches = matches!(label, Value::Symbol(s) if self.sym_name(*s) == "true")
-                        || crate::builtins::values_equal(label, &key);
-                    if matches {
+                    if self.case_label_matches(label, &key) {
                         return self.place_last(&parts[1..]);
                     }
                 }
@@ -1855,6 +1896,29 @@ mod tests {
 
     fn is_true(src: &str) -> bool {
         matches!(run(src), Value::True)
+    }
+
+    #[test]
+    fn case_and_if_not_in_value_and_place_position() {
+        assert_eq!(
+            as_str(run("(case 1 (1 \"one\") (2 \"two\") (true \"other\"))")),
+            "one"
+        );
+        assert_eq!(
+            as_str(run("(case 5 (1 \"one\") (true \"other\"))")),
+            "other"
+        );
+        assert!(matches!(run("(case 9 (1 \"one\"))"), Value::Nil));
+        assert_eq!(as_int(run("(if-not nil 1 2)")), 1);
+        assert_eq!(as_int(run("(if-not true 1 2)")), 2);
+        assert_eq!(as_int(run("(if-not nil 7)")), 7);
+        // Still usable as reference-returning place forms.
+        assert!(is_true(
+            "(set 'L '(a b c)) (pop (case 1 (1 L))) (= L '(b c))"
+        ));
+        assert!(is_true(
+            "(set 'l '((a b) c)) (pop (if-not nil (l 0))) (= l '((b) c))"
+        ));
     }
 
     #[test]

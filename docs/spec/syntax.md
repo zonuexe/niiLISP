@@ -228,7 +228,9 @@ fexpr, not a hygienic macro); it decides what to evaluate:
 
 ```
 (if cond then [c2 e2 …] [else])      ; multi-way; else is the trailing odd form
+(if-not cond then [else])            ; inverse of if
 (cond (test body) …)
+(case key (label body) … (true default))   ; literal labels; true is the default
 (when cond body)  |  (unless cond body)
 (and expr …)      |  (or expr …)     ; short-circuit; return the deciding value
 ```

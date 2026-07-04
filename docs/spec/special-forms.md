@@ -173,6 +173,19 @@ value, or `nil`.
 (if (< x 0) "neg" (> x 0) "pos" "zero")
 ```
 
+### `if-not` — inverse conditional
+
+```
+(if-not cond then [else])
+```
+
+_Evaluates:_ `cond`, then `then` when it is **falsy**, otherwise `else` (or
+`nil`). Like a two/three-armed `unless`.
+
+```
+(if-not (empty? xs) (first xs) 'none)
+```
+
 ### `cond` — clause list
 
 ```
@@ -181,6 +194,20 @@ value, or `nil`.
 
 _Evaluates:_ each clause's `test` until one is truthy, then that clause's `body`.
 Returns the body's value, or `nil` if no clause matches. Each clause is a list.
+
+### `case` — dispatch on a value
+
+```
+(case key (label body) … (true default))
+```
+
+_Evaluates:_ `key`, then the body of the first clause whose **literal** `label`
+equals it. A `true` (or `t`) label is the catch-all default. Returns the body's
+value, or `nil` if nothing matches.
+
+```
+(case n (1 "one") (2 "two") (true "many"))
+```
 
 ### `when` / `unless` — one-armed guards
 
@@ -383,11 +410,10 @@ Evaluates `expr` and returns the wall-clock milliseconds it took (the value of
 
 ## Notes
 
-- **Place-position-only forms.** In addition to the forms above, `case`,
-  `if-not`, `assoc`, and `lookup` are recognised when they appear as a `place`
-  argument to a destructive form (so a reference flows out of them —
-  `(pop (case 1 (1 L)))`). They are not yet general evaluatable special forms in
-  value position; this asymmetry is an implementation gap, not a design choice.
+- **`case` / `if-not` in place position.** Like the other control forms, these
+  also flow a reference out when used as a `place` argument to a destructive
+  form, e.g. `(pop (case 1 (1 L)))`. (`assoc` and `lookup` likewise work in both
+  value and place position.)
 - **Reference-returning.** Most conditionals and sequencing forms (`if`, `when`,
   `unless`, `begin`, `and`, `or`, `cond`) pass a reference out when used in place
   position, which is what lets destructive forms reach through them
