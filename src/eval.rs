@@ -47,7 +47,10 @@ struct Scope<'a> {
 
 impl<'a> Scope<'a> {
     fn new(interp: &'a Interp) -> Self {
-        Scope { interp, saved: Vec::new() }
+        Scope {
+            interp,
+            saved: Vec::new(),
+        }
     }
 
     fn bind(&mut self, sym: SymId, val: Value) {
@@ -177,7 +180,10 @@ impl Interp {
                 let v = self.eval(obj_expr)?;
                 let tmp = self.intern("$self-tmp");
                 self.set_global(tmp, v);
-                Place { root: tmp, path: Vec::new() }
+                Place {
+                    root: tmp,
+                    path: Vec::new(),
+                }
             }
         };
         let obj = self.read_place(&place)?;
@@ -265,7 +271,9 @@ impl Interp {
                 let target = self.eval(&rest[1])?;
                 Ok(slice(i, count, &target))
             }
-            _ => Err(Signal::error("implicit index: expected (i list) or (i count list)")),
+            _ => Err(Signal::error(
+                "implicit index: expected (i list) or (i count list)",
+            )),
         }
     }
 
@@ -276,7 +284,10 @@ impl Interp {
             Value::Builtin(b) => (b.func)(self, &args),
             Value::Lambda(l) => self.call_lambda(l, args),
             Value::Fexpr(l) => self.call_lambda(l, args),
-            other => Err(Signal::Error(format!("not a function: {}", self.repr(other)))),
+            other => Err(Signal::Error(format!(
+                "not a function: {}",
+                self.repr(other)
+            ))),
         }
     }
 
@@ -332,11 +343,7 @@ impl Interp {
 
     // ---- Special forms ---------------------------------------------------
 
-    fn try_special_form(
-        &self,
-        name: &str,
-        args: &[Value],
-    ) -> Option<Result<Value, Signal>> {
+    fn try_special_form(&self, name: &str, args: &[Value]) -> Option<Result<Value, Signal>> {
         let r = match name {
             "quote" => Ok(args.first().cloned().unwrap_or(Value::Nil)),
             "if" => self.sf_if(args),
@@ -554,9 +561,7 @@ impl Interp {
             None => None,
         };
 
-        let integral = is_int(&from)
-            && is_int(&to)
-            && step.as_ref().map(is_int).unwrap_or(true);
+        let integral = is_int(&from) && is_int(&to) && step.as_ref().map(is_int).unwrap_or(true);
         let fromf = num(&from)?;
         let tof = num(&to)?;
         let stepf = match &step {
@@ -709,11 +714,7 @@ impl Interp {
 
     /// Apply an in-place transform to a place, or to a fresh value if the
     /// argument is not a place (e.g. the copy returned by `append`).
-    fn place_or_value(
-        &self,
-        target: &Value,
-        op: impl Fn(&mut Value),
-    ) -> Result<Value, Signal> {
+    fn place_or_value(&self, target: &Value, op: impl Fn(&mut Value)) -> Result<Value, Signal> {
         match self.resolve_place(target) {
             Ok(place) => self.with_place_mut(&place, |loc| {
                 op(loc);
@@ -772,7 +773,9 @@ impl Interp {
 
     fn sf_replace(&self, args: &[Value]) -> Result<Value, Signal> {
         if args.len() < 3 {
-            return Err(Signal::error("replace: expected (replace target place new)"));
+            return Err(Signal::error(
+                "replace: expected (replace target place new)",
+            ));
         }
         let target = self.eval(&args[0])?;
         let newval = self.eval(&args[2])?;
@@ -799,9 +802,7 @@ impl Interp {
                 x.partial_cmp(&y).unwrap_or(Ordering::Equal)
             }
             (Value::Str(x), Value::Str(y)) => x.cmp(y),
-            (Value::Symbol(x), Value::Symbol(y)) => {
-                self.sym_name(*x).cmp(&self.sym_name(*y))
-            }
+            (Value::Symbol(x), Value::Symbol(y)) => self.sym_name(*x).cmp(&self.sym_name(*y)),
             (Value::List(x), Value::List(y)) => {
                 for (p, q) in x.iter().zip(y.iter()) {
                     let c = self.value_cmp(p, q);
@@ -902,7 +903,8 @@ impl Interp {
                 // when the container is an indexable value (list/string); this
                 // rules out ordinary function calls like (list 1 2 3).
                 let mut p = self.resolve_place(&items[0])?;
-                if items.len() > 1 && !matches!(self.read_place(&p)?, Value::List(_) | Value::Str(_))
+                if items.len() > 1
+                    && !matches!(self.read_place(&p)?, Value::List(_) | Value::Str(_))
                 {
                     return Err(Signal::error("not an indexable place"));
                 }
@@ -935,7 +937,10 @@ impl Interp {
 
     fn place_if(&self, args: &[Value], invert: bool) -> Result<Place, Signal> {
         // (if c then [else]) / (if-not c then [else]) -> place of the taken branch.
-        let cond = self.eval(args.first().ok_or_else(|| Signal::error("if: no condition"))?)?;
+        let cond = self.eval(
+            args.first()
+                .ok_or_else(|| Signal::error("if: no condition"))?,
+        )?;
         let taken = if cond.is_truthy() ^ invert {
             args.get(1)
         } else {
@@ -949,7 +954,10 @@ impl Interp {
 
     fn place_guard(&self, args: &[Value], positive: bool) -> Result<Place, Signal> {
         // (when c body...) / (unless c body...) -> place of the last body form.
-        let cond = self.eval(args.first().ok_or_else(|| Signal::error("when: no condition"))?)?;
+        let cond = self.eval(
+            args.first()
+                .ok_or_else(|| Signal::error("when: no condition"))?,
+        )?;
         if cond.is_truthy() == positive {
             self.place_last(&args[1..])
         } else {
@@ -1011,7 +1019,10 @@ impl Interp {
         // (setq place val ...) / (set 'sym val ...) evaluated for its effect;
         // the reference is the last assigned place.
         self.sf_setf(args)?;
-        self.resolve_place(args.first().ok_or_else(|| Signal::error("set: no target"))?)
+        self.resolve_place(
+            args.first()
+                .ok_or_else(|| Signal::error("set: no target"))?,
+        )
     }
 
     fn sf_setref(&self, args: &[Value], all: bool) -> Result<Value, Signal> {
@@ -1172,12 +1183,20 @@ impl Interp {
         if self.protected.borrow().contains(&sym) {
             // When the protected symbol is the container of the current `self`,
             // newLISP names it "container of (self)".
-            let name = if self.self_stack.borrow().last().is_some_and(|p| p.root == sym) {
+            let name = if self
+                .self_stack
+                .borrow()
+                .last()
+                .is_some_and(|p| p.root == sym)
+            {
                 "container of (self)".to_string()
             } else {
                 self.sym_name(sym)
             };
-            Err(Signal::Error(format!("ERR: symbol is protected : MAIN:{}", name)))
+            Err(Signal::Error(format!(
+                "ERR: symbol is protected : MAIN:{}",
+                name
+            )))
         } else {
             Ok(())
         }
@@ -1651,15 +1670,23 @@ mod tests {
 
     #[test]
     fn for_loop_inclusive_and_directional() {
-        assert_eq!(as_int(run("(set 's 0) (for (i 1 5) (set 's (+ s i))) s")), 15);
+        assert_eq!(
+            as_int(run("(set 's 0) (for (i 1 5) (set 's (+ s i))) s")),
+            15
+        );
         // Descending when from > to.
-        assert_eq!(as_int(run("(set 's 0) (for (i 5 1) (set 's (+ s 1))) s")), 5);
+        assert_eq!(
+            as_int(run("(set 's 0) (for (i 5 1) (set 's (+ s 1))) s")),
+            5
+        );
     }
 
     #[test]
     fn dolist_iterates() {
         assert_eq!(
-            as_int(run("(set 's 0) (dolist (x (list 2 3 4)) (set 's (+ s x))) s")),
+            as_int(run(
+                "(set 's 0) (dolist (x (list 2 3 4)) (set 's (+ s x))) s"
+            )),
             9
         );
     }
@@ -1679,7 +1706,9 @@ mod tests {
             30
         );
         assert_eq!(
-            as_int(run("(length (filter (lambda (x) (< x 3)) (list 1 2 3 4 5)))")),
+            as_int(run(
+                "(length (filter (lambda (x) (< x 3)) (list 1 2 3 4 5)))"
+            )),
             2
         );
     }
@@ -1710,8 +1739,14 @@ mod tests {
 
     #[test]
     fn setf_into_places() {
-        assert_eq!(as_int(run("(set 'L (list 1 2 3)) (setf (L 1) 99) (nth 1 L)")), 99);
-        assert_eq!(as_int(run("(set 'L (list 1 2 3)) (setf (nth 0 L) 7) (first L)")), 7);
+        assert_eq!(
+            as_int(run("(set 'L (list 1 2 3)) (setf (L 1) 99) (nth 1 L)")),
+            99
+        );
+        assert_eq!(
+            as_int(run("(set 'L (list 1 2 3)) (setf (nth 0 L) 7) (first L)")),
+            7
+        );
         // Nested list place.
         let prog = "(set 'M (list (list 1 2) (list 3 4))) (setf (M 1 0) 88) (nth 0 (nth 1 M))";
         assert_eq!(as_int(run(prog)), 88);
@@ -1724,7 +1759,9 @@ mod tests {
             25
         );
         assert_eq!(
-            as_int(run("(set 'M (list (list 1) (list 2))) (push 9 (M 0) -1) (length (nth 0 M))")),
+            as_int(run(
+                "(set 'M (list (list 1) (list 2))) (push 9 (M 0) -1) (length (nth 0 M))"
+            )),
             2
         );
         assert_eq!(as_int(run("(set 'M (list (list 7 8))) (pop (M 0))")), 7);
@@ -1772,8 +1809,12 @@ mod tests {
     #[test]
     fn reference_returning_control_forms() {
         // A place flows out of the taken branch, so destructive ops reach it.
-        assert!(is_true("(set 'l '((a b) c)) (pop (if true (l 0) '(x))) (= l '((b) c))"));
-        assert!(is_true("(set 'L '(a b c)) (pop (case 1 (1 L))) (= L '(b c))"));
+        assert!(is_true(
+            "(set 'l '((a b) c)) (pop (if true (l 0) '(x))) (= l '((b) c))"
+        ));
+        assert!(is_true(
+            "(set 'L '(a b c)) (pop (case 1 (1 L))) (= L '(b c))"
+        ));
         assert!(is_true(
             "(set 'L '(a b c)) (pop (cond (nil 1) (true L))) (= L '(b c))"
         ));
@@ -1781,7 +1822,9 @@ mod tests {
 
     #[test]
     fn place_aware_setq_and_it() {
-        assert!(is_true("(set 'l '(a b c)) (setq (first l) 99) (= l '(99 b c))"));
+        assert!(is_true(
+            "(set 'l '(a b c)) (setq (first l) 99) (= l '(99 b c))"
+        ));
         assert!(is_true(
             "(set 'l '((a 1) (b 2))) (setq (assoc 'b l) '(b 3)) (= l '((a 1) (b 3)))"
         ));

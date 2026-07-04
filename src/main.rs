@@ -1,11 +1,14 @@
 //! niiLISP interpreter command-line entry point.
 //!
 //! Usage:
-//!   niilisp [FILE]        run a script (or start a REPL if no FILE)
-//!   niilisp -e EXPR       evaluate EXPR
-//!   niilisp -             read a script from standard input
-//!   niilisp --version     print the version
-//!   niilisp --help        print usage
+//!
+//! ```text
+//! niilisp FILE          run a script (or start a REPL if no FILE)
+//! niilisp -e EXPR       evaluate EXPR
+//! niilisp -             read a script from standard input
+//! niilisp --version     print the version
+//! niilisp --help        print usage
+//! ```
 
 mod builtins;
 mod eval;
@@ -21,7 +24,7 @@ use reader::Reader;
 use value::Value;
 
 const USAGE: &str = "\
-niilisp — a re-implementation of the newLISP dialect
+niilisp - a re-implementation of the newLISP dialect
 
 USAGE:
     niilisp [FILE]        Run a script file
@@ -118,7 +121,10 @@ fn signal_message(interp: &Interp, sig: Signal) -> String {
 
 fn repl(interp: &Interp) {
     use std::io::{BufRead, Write};
-    eprintln!("niilisp {} — type expressions, Ctrl-D to exit", env!("CARGO_PKG_VERSION"));
+    eprintln!(
+        "niilisp {} - type expressions, Ctrl-D to exit",
+        env!("CARGO_PKG_VERSION")
+    );
     let stdin = std::io::stdin();
     loop {
         print!("niilisp> ");

@@ -230,7 +230,9 @@ fn div_flt(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
 
 /// Apply a unary f64 function to the first argument.
 fn flt1(args: &[Value], f: fn(f64) -> f64) -> Result<Value, Signal> {
-    Ok(Value::Float(f(to_f64(args.first().unwrap_or(&Value::Nil))?)))
+    Ok(Value::Float(f(to_f64(
+        args.first().unwrap_or(&Value::Nil),
+    )?)))
 }
 
 fn b_log(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
@@ -257,11 +259,15 @@ fn b_mod(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
 }
 
 fn is_nan_p(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
-    Ok(boolean(matches!(args.first(), Some(Value::Float(f)) if f.is_nan())))
+    Ok(boolean(
+        matches!(args.first(), Some(Value::Float(f)) if f.is_nan()),
+    ))
 }
 
 fn is_inf_p(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
-    Ok(boolean(matches!(args.first(), Some(Value::Float(f)) if f.is_infinite())))
+    Ok(boolean(
+        matches!(args.first(), Some(Value::Float(f)) if f.is_infinite()),
+    ))
 }
 
 fn b_int(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
@@ -511,7 +517,9 @@ fn b_append(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
 
 fn b_sequence(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
     if args.len() < 2 {
-        return Err(Signal::error("sequence: expected (sequence from to [step])"));
+        return Err(Signal::error(
+            "sequence: expected (sequence from to [step])",
+        ));
     }
     let integral = args.iter().all(|v| matches!(v, Value::Int(_)));
     let from = to_f64(&args[0])?;
@@ -655,7 +663,9 @@ fn is_empty(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
     }))
 }
 fn b_not(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
-    Ok(boolean(!args.first().map(|v| v.is_truthy()).unwrap_or(false)))
+    Ok(boolean(
+        !args.first().map(|v| v.is_truthy()).unwrap_or(false),
+    ))
 }
 
 fn b_eval(i: &Interp, args: &[Value]) -> Result<Value, Signal> {
@@ -730,13 +740,17 @@ fn shl(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
     if args.len() != 2 {
         return Err(Signal::error("<<: expected 2 arguments"));
     }
-    Ok(Value::Int(to_i64(&args[0])?.wrapping_shl(to_i64(&args[1])? as u32)))
+    Ok(Value::Int(
+        to_i64(&args[0])?.wrapping_shl(to_i64(&args[1])? as u32),
+    ))
 }
 fn shr(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
     if args.len() != 2 {
         return Err(Signal::error(">>: expected 2 arguments"));
     }
-    Ok(Value::Int(to_i64(&args[0])?.wrapping_shr(to_i64(&args[1])? as u32)))
+    Ok(Value::Int(
+        to_i64(&args[0])?.wrapping_shr(to_i64(&args[1])? as u32),
+    ))
 }
 
 fn time_of_day(_: &Interp, _: &[Value]) -> Result<Value, Signal> {

@@ -16,7 +16,11 @@ pub struct Reader<'a> {
 
 impl<'a> Reader<'a> {
     pub fn new(src: &'a [u8], interner: &'a mut Interner) -> Self {
-        Reader { src, pos: 0, interner }
+        Reader {
+            src,
+            pos: 0,
+            interner,
+        }
     }
 
     /// Read every top-level form in the source.
@@ -261,7 +265,10 @@ fn parse_number(text: &str) -> NumParse {
         Some(rest) => (-1i64, rest),
         None => (1i64, text),
     };
-    if let Some(hex) = hexbody.strip_prefix("0x").or_else(|| hexbody.strip_prefix("0X")) {
+    if let Some(hex) = hexbody
+        .strip_prefix("0x")
+        .or_else(|| hexbody.strip_prefix("0X"))
+    {
         if let Ok(n) = i64::from_str_radix(hex, 16) {
             return NumParse::Num(Value::Int(sign.wrapping_mul(n)));
         }

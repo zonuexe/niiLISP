@@ -4,8 +4,24 @@ version = "0.1.0"
 edition = "2021"
 description = "A re-implementation of the newLISP dialect, prioritising compatibility with existing newLISP assets."
 license = "GPL-3.0-or-later"
-repository = "https://github.com/TypedDuck/niiLISP"
+repository = "https://github.com/zonuexe/niiLISP"
+readme = "README.md"
+authors = ["TypedDuck", "USAMI Kenta <tadsan@zonu.me>"]
+keywords = ["lisp", "newlisp", "interpreter", "scripting"]
+categories = ["command-line-utilities", "development-tools"]
 rust-version = "1.80"
+# Ship code + user docs only; agent/CI tooling and the vendored newLISP
+# reference (a large GPLv3 submodule) are not part of the crate.
+exclude = [
+    "/.github",
+    "/.claude",
+    "/AGENTS.md",
+    "/CLAUDE.md",
+    "/docs/notes",
+    "/docs/agents",
+    "/references",
+    "/tests",
+]
 
 [[bin]]
 name = "niilisp"

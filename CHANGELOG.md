@@ -1,7 +1,10 @@
 # Changelog
 
-All notable changes to niiLISP are documented here. This project adheres to
+All notable changes to niiLISP are documented here. The format is based on
+[Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 [Semantic Versioning](https://semver.org/).
+
+## [Unreleased]
 
 ## [0.1.0] - 2026-07-04
 
@@ -35,3 +38,6 @@ Initial release: a usable command-line interpreter for small newLISP scripts.
 
 `import`/FFI, networking, bigint, arrays, full UTF-8 character operations, and
 the remaining newLISP standard library.
+
+[Unreleased]: https://github.com/zonuexe/niiLISP/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/zonuexe/niiLISP/releases/tag/v0.1.0
