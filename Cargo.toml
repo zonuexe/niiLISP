@@ -19,6 +19,7 @@ exclude = [
     "/CLAUDE.md",
     "/docs/notes",
     "/docs/agents",
+    "/docs/CURRENT_WORK.md",
     "/references",
     "/tests",
 ]
