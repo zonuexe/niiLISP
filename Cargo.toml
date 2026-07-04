@@ -1,0 +1,15 @@
+[package]
+name = "niilisp"
+version = "0.0.1"
+edition = "2021"
+description = "A re-implementation of the newLISP dialect, prioritising compatibility with existing newLISP assets."
+license = "GPL-3.0-or-later"
+repository = "https://github.com/TypedDuck/niiLISP"
+rust-version = "1.80"
+
+[[bin]]
+name = "niilisp"
+path = "src/main.rs"
+
+[profile.release]
+opt-level = 3

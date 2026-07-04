@@ -1,0 +1,519 @@
+//! Primitive functions.
+//!
+//! Integer arithmetic (`+ - * / %`) wraps on overflow (ADR-0012); float
+//! arithmetic uses `add sub mul div`, matching newLISP's split. Strings are
+//! byte buffers, so `length` counts bytes (ADR-0013).
+
+use std::cmp::Ordering;
+use std::io::Write;
+
+use crate::eval::{Interp, Signal};
+use crate::printer::to_display;
+use crate::value::{Builtin, BuiltinFn, Value};
+
+pub fn install(interp: &Interp) {
+    let reg = |name: &'static str, func: BuiltinFn| {
+        let id = interp.intern(name);
+        interp.set_global(id, Value::Builtin(Builtin { name, func }));
+    };
+
+    // Integer arithmetic (wrapping).
+    reg("+", add_int);
+    reg("-", sub_int);
+    reg("*", mul_int);
+    reg("/", div_int);
+    reg("%", mod_int);
+    // Float arithmetic.
+    reg("add", add_flt);
+    reg("sub", sub_flt);
+    reg("mul", mul_flt);
+    reg("div", div_flt);
+    reg("sqrt", flt1_sqrt);
+    reg("abs", b_abs);
+    reg("atan", flt1_atan);
+    // Comparison.
+    reg("=", eq);
+    reg("!=", ne);
+    reg("<", lt);
+    reg(">", gt);
+    reg("<=", le);
+    reg(">=", ge);
+    // Lists.
+    reg("list", b_list);
+    reg("cons", b_cons);
+    reg("first", b_first);
+    reg("rest", b_rest);
+    reg("last", b_last);
+    reg("nth", b_nth);
+    reg("length", b_length);
+    reg("append", b_append);
+    reg("reverse", b_reverse);
+    // Predicates.
+    reg("nil?", is_nil);
+    reg("null?", is_nil);
+    reg("integer?", is_integer);
+    reg("float?", is_float);
+    reg("number?", is_number);
+    reg("string?", is_string);
+    reg("symbol?", is_symbol);
+    reg("list?", is_list);
+    reg("atom?", is_atom);
+    reg("zero?", is_zero);
+    reg("empty?", is_empty);
+    reg("not", b_not);
+    reg("eval", b_eval);
+    // I/O and misc.
+    reg("print", b_print);
+    reg("println", b_println);
+    reg("string", b_string);
+    reg("exit", b_exit);
+}
+
+// ---- numeric coercion ----------------------------------------------------
+
+fn to_i64(v: &Value) -> Result<i64, Signal> {
+    match v {
+        Value::Int(n) => Ok(*n),
+        Value::Float(f) => Ok(*f as i64),
+        _ => Err(Signal::error("expected a number")),
+    }
+}
+
+fn to_f64(v: &Value) -> Result<f64, Signal> {
+    match v {
+        Value::Int(n) => Ok(*n as f64),
+        Value::Float(f) => Ok(*f),
+        _ => Err(Signal::error("expected a number")),
+    }
+}
+
+fn as_f64_opt(v: &Value) -> Option<f64> {
+    match v {
+        Value::Int(n) => Some(*n as f64),
+        Value::Float(f) => Some(*f),
+        _ => None,
+    }
+}
+
+// ---- integer arithmetic (wrapping, ADR-0012) -----------------------------
+
+fn add_int(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    let mut acc: i64 = 0;
+    for a in args {
+        acc = acc.wrapping_add(to_i64(a)?);
+    }
+    Ok(Value::Int(acc))
+}
+
+fn sub_int(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    if args.is_empty() {
+        return Ok(Value::Int(0));
+    }
+    let mut acc = to_i64(&args[0])?;
+    if args.len() == 1 {
+        return Ok(Value::Int(acc.wrapping_neg()));
+    }
+    for a in &args[1..] {
+        acc = acc.wrapping_sub(to_i64(a)?);
+    }
+    Ok(Value::Int(acc))
+}
+
+fn mul_int(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    let mut acc: i64 = 1;
+    for a in args {
+        acc = acc.wrapping_mul(to_i64(a)?);
+    }
+    Ok(Value::Int(acc))
+}
+
+fn div_int(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    if args.is_empty() {
+        return Ok(Value::Int(1));
+    }
+    let mut acc = to_i64(&args[0])?;
+    for a in &args[1..] {
+        let d = to_i64(a)?;
+        if d == 0 {
+            return Err(Signal::error("division by zero"));
+        }
+        acc = acc.wrapping_div(d);
+    }
+    Ok(Value::Int(acc))
+}
+
+fn mod_int(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    if args.len() != 2 {
+        return Err(Signal::error("%: expected 2 arguments"));
+    }
+    let d = to_i64(&args[1])?;
+    if d == 0 {
+        return Err(Signal::error("division by zero"));
+    }
+    Ok(Value::Int(to_i64(&args[0])?.wrapping_rem(d)))
+}
+
+// ---- float arithmetic ----------------------------------------------------
+
+fn add_flt(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    let mut acc = 0.0;
+    for a in args {
+        acc += to_f64(a)?;
+    }
+    Ok(Value::Float(acc))
+}
+
+fn sub_flt(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    if args.is_empty() {
+        return Ok(Value::Float(0.0));
+    }
+    let mut acc = to_f64(&args[0])?;
+    if args.len() == 1 {
+        return Ok(Value::Float(-acc));
+    }
+    for a in &args[1..] {
+        acc -= to_f64(a)?;
+    }
+    Ok(Value::Float(acc))
+}
+
+fn mul_flt(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    let mut acc = 1.0;
+    for a in args {
+        acc *= to_f64(a)?;
+    }
+    Ok(Value::Float(acc))
+}
+
+fn div_flt(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    if args.is_empty() {
+        return Ok(Value::Float(1.0));
+    }
+    let mut acc = to_f64(&args[0])?;
+    for a in &args[1..] {
+        acc /= to_f64(a)?;
+    }
+    Ok(Value::Float(acc))
+}
+
+fn flt1_sqrt(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    Ok(Value::Float(to_f64(args.first().unwrap_or(&Value::Nil))?.sqrt()))
+}
+
+fn flt1_atan(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    Ok(Value::Float(to_f64(args.first().unwrap_or(&Value::Nil))?.atan()))
+}
+
+fn b_abs(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    match args.first() {
+        Some(Value::Int(n)) => Ok(Value::Int(n.wrapping_abs())),
+        Some(Value::Float(f)) => Ok(Value::Float(f.abs())),
+        _ => Err(Signal::error("abs: expected a number")),
+    }
+}
+
+// ---- comparison ----------------------------------------------------------
+
+fn values_equal(a: &Value, b: &Value) -> bool {
+    match (a, b) {
+        (Value::Nil, Value::Nil) | (Value::True, Value::True) => true,
+        (Value::Int(x), Value::Int(y)) => x == y,
+        (Value::Float(x), Value::Float(y)) => x == y,
+        (Value::Int(x), Value::Float(y)) | (Value::Float(y), Value::Int(x)) => (*x as f64) == *y,
+        (Value::Str(x), Value::Str(y)) => x == y,
+        (Value::Symbol(x), Value::Symbol(y)) => x == y,
+        (Value::List(x), Value::List(y)) => {
+            x.len() == y.len() && x.iter().zip(y).all(|(p, q)| values_equal(p, q))
+        }
+        _ => false,
+    }
+}
+
+fn order(a: &Value, b: &Value) -> Option<Ordering> {
+    if let (Some(x), Some(y)) = (as_f64_opt(a), as_f64_opt(b)) {
+        return x.partial_cmp(&y);
+    }
+    if let (Value::Str(x), Value::Str(y)) = (a, b) {
+        return Some(x.cmp(y));
+    }
+    None
+}
+
+fn eq(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    for w in args.windows(2) {
+        if !values_equal(&w[0], &w[1]) {
+            return Ok(Value::Nil);
+        }
+    }
+    Ok(Value::True)
+}
+
+fn ne(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    for w in args.windows(2) {
+        if values_equal(&w[0], &w[1]) {
+            return Ok(Value::Nil);
+        }
+    }
+    Ok(Value::True)
+}
+
+fn chain(args: &[Value], accept: impl Fn(Ordering) -> bool) -> Result<Value, Signal> {
+    for w in args.windows(2) {
+        match order(&w[0], &w[1]) {
+            Some(o) => {
+                if !accept(o) {
+                    return Ok(Value::Nil);
+                }
+            }
+            None => return Err(Signal::error("cannot compare these values")),
+        }
+    }
+    Ok(Value::True)
+}
+
+fn lt(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    chain(args, |o| o == Ordering::Less)
+}
+fn gt(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    chain(args, |o| o == Ordering::Greater)
+}
+fn le(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    chain(args, |o| o != Ordering::Greater)
+}
+fn ge(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    chain(args, |o| o != Ordering::Less)
+}
+
+// ---- lists ---------------------------------------------------------------
+
+fn b_list(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    Ok(Value::List(args.to_vec()))
+}
+
+fn b_cons(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    if args.len() != 2 {
+        return Err(Signal::error("cons: expected 2 arguments"));
+    }
+    // No dotted pairs (ADR-0005): (cons x list) prepends; otherwise a 2-list.
+    match &args[1] {
+        Value::List(tail) => {
+            let mut out = Vec::with_capacity(tail.len() + 1);
+            out.push(args[0].clone());
+            out.extend_from_slice(tail);
+            Ok(Value::List(out))
+        }
+        other => Ok(Value::List(vec![args[0].clone(), other.clone()])),
+    }
+}
+
+fn b_first(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    match args.first() {
+        Some(Value::List(l)) => l
+            .first()
+            .cloned()
+            .ok_or_else(|| Signal::error("first: empty list")),
+        Some(Value::Str(b)) if !b.is_empty() => Ok(Value::Str(vec![b[0]])),
+        _ => Err(Signal::error("first: expected a non-empty list or string")),
+    }
+}
+
+fn b_rest(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    match args.first() {
+        Some(Value::List(l)) => Ok(Value::List(l.get(1..).unwrap_or(&[]).to_vec())),
+        Some(Value::Str(b)) => Ok(Value::Str(b.get(1..).unwrap_or(&[]).to_vec())),
+        _ => Err(Signal::error("rest: expected a list or string")),
+    }
+}
+
+fn b_last(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    match args.first() {
+        Some(Value::List(l)) => l
+            .last()
+            .cloned()
+            .ok_or_else(|| Signal::error("last: empty list")),
+        _ => Err(Signal::error("last: expected a list")),
+    }
+}
+
+fn b_nth(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    if args.len() != 2 {
+        return Err(Signal::error("nth: expected (nth index list)"));
+    }
+    let idx = to_i64(&args[0])?;
+    match &args[1] {
+        Value::List(l) => {
+            let i = if idx < 0 { l.len() as i64 + idx } else { idx };
+            if i < 0 || i as usize >= l.len() {
+                Ok(Value::Nil)
+            } else {
+                Ok(l[i as usize].clone())
+            }
+        }
+        _ => Err(Signal::error("nth: expected a list")),
+    }
+}
+
+fn b_length(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    let n = match args.first() {
+        Some(Value::List(l)) => l.len() as i64,
+        Some(Value::Str(b)) => b.len() as i64, // bytes, per ADR-0013
+        Some(Value::Nil) | None => 0,
+        _ => 0,
+    };
+    Ok(Value::Int(n))
+}
+
+fn b_append(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    let mut out = Vec::new();
+    for a in args {
+        match a {
+            Value::List(l) => out.extend_from_slice(l),
+            other => {
+                return Err(Signal::Error(format!(
+                    "append: expected a list, got {}",
+                    type_name(other)
+                )))
+            }
+        }
+    }
+    Ok(Value::List(out))
+}
+
+fn b_reverse(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    match args.first() {
+        Some(Value::List(l)) => {
+            let mut v = l.clone();
+            v.reverse();
+            Ok(Value::List(v))
+        }
+        Some(Value::Str(b)) => {
+            let mut v = b.clone();
+            v.reverse();
+            Ok(Value::Str(v))
+        }
+        _ => Err(Signal::error("reverse: expected a list or string")),
+    }
+}
+
+// ---- predicates ----------------------------------------------------------
+
+fn boolean(b: bool) -> Value {
+    if b {
+        Value::True
+    } else {
+        Value::Nil
+    }
+}
+
+fn is_nil(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    Ok(boolean(matches!(args.first(), Some(Value::Nil) | None)))
+}
+fn is_integer(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    Ok(boolean(matches!(args.first(), Some(Value::Int(_)))))
+}
+fn is_float(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    Ok(boolean(matches!(args.first(), Some(Value::Float(_)))))
+}
+fn is_number(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    Ok(boolean(matches!(
+        args.first(),
+        Some(Value::Int(_)) | Some(Value::Float(_))
+    )))
+}
+fn is_string(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    Ok(boolean(matches!(args.first(), Some(Value::Str(_)))))
+}
+fn is_symbol(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    Ok(boolean(matches!(args.first(), Some(Value::Symbol(_)))))
+}
+fn is_list(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    Ok(boolean(matches!(args.first(), Some(Value::List(_)))))
+}
+fn is_atom(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    Ok(boolean(!matches!(args.first(), Some(Value::List(_)))))
+}
+fn is_zero(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    Ok(boolean(
+        matches!(args.first(), Some(Value::Int(0)))
+            || matches!(args.first(), Some(Value::Float(f)) if *f == 0.0),
+    ))
+}
+fn is_empty(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    Ok(boolean(match args.first() {
+        Some(Value::List(l)) => l.is_empty(),
+        Some(Value::Str(b)) => b.is_empty(),
+        Some(Value::Nil) | None => true,
+        _ => false,
+    }))
+}
+fn b_not(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    Ok(boolean(!args.first().map(|v| v.is_truthy()).unwrap_or(false)))
+}
+
+fn b_eval(i: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    i.eval(args.first().unwrap_or(&Value::Nil))
+}
+
+// ---- I/O and misc --------------------------------------------------------
+
+fn do_print(i: &Interp, args: &[Value], newline: bool) -> Result<Value, Signal> {
+    let stdout = std::io::stdout();
+    let mut lock = stdout.lock();
+    for a in args {
+        match a {
+            Value::Str(b) => {
+                let _ = lock.write_all(b);
+            }
+            other => {
+                let s = to_display(other, &i.interner.borrow());
+                let _ = lock.write_all(s.as_bytes());
+            }
+        }
+    }
+    if newline {
+        let _ = lock.write_all(b"\n");
+    }
+    let _ = lock.flush();
+    Ok(args.last().cloned().unwrap_or(Value::Nil))
+}
+
+fn b_print(i: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    do_print(i, args, false)
+}
+fn b_println(i: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    do_print(i, args, true)
+}
+
+fn b_string(i: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    let mut out = Vec::new();
+    for a in args {
+        match a {
+            Value::Str(b) => out.extend_from_slice(b),
+            other => out.extend_from_slice(to_display(other, &i.interner.borrow()).as_bytes()),
+        }
+    }
+    Ok(Value::Str(out))
+}
+
+fn b_exit(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    let code = match args.first() {
+        Some(Value::Int(n)) => *n as i32,
+        _ => 0,
+    };
+    std::process::exit(code);
+}
+
+fn type_name(v: &Value) -> &'static str {
+    match v {
+        Value::Nil => "nil",
+        Value::True => "true",
+        Value::Int(_) => "integer",
+        Value::Float(_) => "float",
+        Value::Str(_) => "string",
+        Value::Symbol(_) => "symbol",
+        Value::List(_) => "list",
+        Value::Lambda(_) => "lambda",
+        Value::Fexpr(_) => "lambda-macro",
+        Value::Builtin(_) => "builtin",
+    }
+}
