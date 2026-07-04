@@ -173,7 +173,9 @@ Indices may be negative (from the end). Implicit indexing composes:
 
 Special forms control evaluation of their arguments. Syntax lines below use the
 notation from the top. `body` is a sequence of expressions; its value is that of
-the last one (`nil` if empty).
+the last one (`nil` if empty). For a per-form reference — which arguments each
+one evaluates, with examples and edge cases — see
+[`special-forms.md`](special-forms.md).
 
 ### 6.1 Definition and functions
 
