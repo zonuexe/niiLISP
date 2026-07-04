@@ -39,6 +39,10 @@ pub struct Interp {
     /// Loaded shared libraries, kept open for the process lifetime (ADR-0019).
     #[cfg(all(feature = "ffi", unix))]
     libs: RefCell<HashMap<String, libloading::Library>>,
+    /// libffi closures for `callback`, kept alive for the process lifetime so C
+    /// never holds a dangling function pointer (ADR-0020).
+    #[cfg(all(feature = "ffi", unix))]
+    callbacks: RefCell<Vec<libffi::middle::Closure<'static>>>,
 }
 
 /// A dynamic-binding scope. On drop it restores every slot it changed, in
@@ -87,6 +91,8 @@ impl Interp {
             protected: RefCell::new(HashSet::new()),
             #[cfg(all(feature = "ffi", unix))]
             libs: RefCell::new(HashMap::new()),
+            #[cfg(all(feature = "ffi", unix))]
+            callbacks: RefCell::new(Vec::new()),
         };
         builtins::install(&interp);
         crate::ffi::install(&interp);
@@ -119,6 +125,12 @@ impl Interp {
         let sym: libloading::Symbol<unsafe extern "C" fn()> = unsafe { lib.get(&symbol).ok()? };
         let addr = *sym as usize;
         Some(libffi::middle::CodePtr(addr as *mut std::ffi::c_void))
+    }
+
+    /// Keep a `callback` closure alive for the process lifetime (ADR-0020).
+    #[cfg(all(feature = "ffi", unix))]
+    pub fn keep_callback(&self, closure: libffi::middle::Closure<'static>) {
+        self.callbacks.borrow_mut().push(closure);
     }
 
     pub fn intern(&self, name: &str) -> SymId {

@@ -238,10 +238,130 @@ fn parse_type(b: &[u8]) -> Result<CType, Signal> {
     CType::parse(&s).ok_or_else(|| Signal::Error(format!("import: unknown FFI type `{}`", s)))
 }
 
+// ---- callback (C -> Lisp, ADR-0020) --------------------------------------
+
+/// Userdata for a callback closure: how to re-enter and what to run.
+#[cfg(all(feature = "ffi", unix))]
+struct CallbackData {
+    interp: *const Interp,
+    func: Value,
+    arg_types: Vec<CType>,
+    ret_type: CType,
+}
+
+/// The C-callable trampoline: decode C args, evaluate the niiLISP function with
+/// an implicit catch, encode the result. Exceptions never cross the C frames.
+#[cfg(all(feature = "ffi", unix))]
+unsafe extern "C" fn trampoline(
+    _cif: &libffi::low::ffi_cif,
+    result: &mut u64,
+    args: *const *const std::ffi::c_void,
+    data: &CallbackData,
+) {
+    use std::ffi::{c_void, CStr};
+    use std::os::raw::c_char;
+
+    let interp = &*data.interp;
+    let mut values = Vec::with_capacity(data.arg_types.len());
+    for (i, ct) in data.arg_types.iter().enumerate() {
+        let p = *args.add(i);
+        let v = match ct {
+            CType::Int => Value::Int(*(p as *const i32) as i64),
+            CType::Long => Value::Int(*(p as *const i64)),
+            CType::Float => Value::Float(*(p as *const f32) as f64),
+            CType::Double => Value::Float(*(p as *const f64)),
+            CType::CharPtr => {
+                let sp = *(p as *const *const c_char);
+                if sp.is_null() {
+                    Value::Nil
+                } else {
+                    Value::Str(CStr::from_ptr(sp).to_bytes().to_vec())
+                }
+            }
+            CType::VoidPtr => Value::Int(*(p as *const *const c_void) as usize as i64),
+            CType::Void => Value::Nil,
+        };
+        values.push(v);
+    }
+
+    let out = match interp.call(&data.func, values) {
+        Ok(v) => v,
+        Err(Signal::Error(m)) => {
+            eprintln!("callback error: {}", m);
+            Value::Nil
+        }
+        Err(Signal::Throw(_)) => {
+            eprintln!("callback: uncaught throw");
+            Value::Nil
+        }
+    };
+
+    let as_i64 = |v: &Value| match v {
+        Value::Int(n) => *n,
+        Value::Float(f) => *f as i64,
+        _ => 0,
+    };
+    let as_f64 = |v: &Value| match v {
+        Value::Int(n) => *n as f64,
+        Value::Float(f) => *f,
+        _ => 0.0,
+    };
+    match data.ret_type {
+        CType::Void => {}
+        CType::Int | CType::Long | CType::VoidPtr | CType::CharPtr => *result = as_i64(&out) as u64,
+        CType::Float => *(result as *mut u64 as *mut f32) = as_f64(&out) as f32,
+        CType::Double => *(result as *mut u64 as *mut f64) = as_f64(&out),
+    }
+}
+
+/// `(callback 'func "ret-type" "arg-type"...)` — a C function pointer that calls
+/// back into `func`. Returns the code-pointer address as an integer.
+#[cfg(all(feature = "ffi", unix))]
+fn b_callback(interp: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    let target = args
+        .first()
+        .ok_or_else(|| Signal::error("callback: missing function"))?;
+    // A symbol resolves to its function value; a function value is used directly.
+    let func = match target {
+        Value::Symbol(_) => interp.eval(target)?,
+        other => other.clone(),
+    };
+    let ret_type = match args.get(1) {
+        Some(Value::Str(b)) => parse_type(b)?,
+        None => CType::Void,
+        _ => return Err(Signal::error("callback: return type must be a string")),
+    };
+    let mut arg_types = Vec::new();
+    for a in &args[2..] {
+        match a {
+            Value::Str(b) => arg_types.push(parse_type(b)?),
+            _ => return Err(Signal::error("callback: argument types must be strings")),
+        }
+    }
+
+    let cif = libffi::middle::Cif::new(
+        arg_types.iter().copied().map(ctype_to_ffi),
+        ctype_to_ffi(ret_type),
+    );
+    // Leak the userdata to 'static; the closure is kept for the process lifetime
+    // anyway (ADR-0020), so this is not an additional leak.
+    let data: &'static CallbackData = Box::leak(Box::new(CallbackData {
+        interp: interp as *const Interp,
+        func,
+        arg_types,
+        ret_type,
+    }));
+    let closure = libffi::middle::Closure::new(cif, trampoline, data);
+    let code = *closure.code_ptr() as usize as i64;
+    interp.keep_callback(closure);
+    Ok(Value::Int(code))
+}
+
 /// Register FFI builtins. A no-op in a pure build.
 #[cfg(all(feature = "ffi", unix))]
 pub fn install(interp: &Interp) {
     interp.register_builtin("import", b_import);
+    interp.register_builtin("callback", b_callback);
 }
 
 #[cfg(not(all(feature = "ffi", unix)))]

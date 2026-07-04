@@ -14,7 +14,8 @@ fn import_and_call_c_functions() {
         &src,
         "int add3(int x){return x+3;}\n\
          double half(double d){return d/2.0;}\n\
-         const char* greet(void){return \"hi\";}\n",
+         const char* greet(void){return \"hi\";}\n\
+         int apply_cb(int (*f)(int), int x){return f(x);}\n",
     )
     .unwrap();
 
@@ -37,9 +38,12 @@ fn import_and_call_c_functions() {
         "(import \"{lib}\" \"add3\" \"int\" \"int\")\n\
          (import \"{lib}\" \"half\" \"double\" \"double\")\n\
          (import \"{lib}\" \"greet\" \"char*\")\n\
+         (import \"{lib}\" \"apply_cb\" \"int\" \"void*\" \"int\")\n\
+         (define (dbl x) (* x 2))\n\
          (println \"add3=\" (add3 39))\n\
          (println \"half=\" (half 7.0))\n\
-         (println \"greet=\" (greet))\n",
+         (println \"greet=\" (greet))\n\
+         (println \"cb=\" (apply_cb (callback 'dbl \"int\" \"int\") 21))\n",
         lib = lib.display()
     );
 
@@ -54,6 +58,7 @@ fn import_and_call_c_functions() {
     let _ = std::fs::remove_dir_all(&dir);
 
     assert!(stdout.contains("add3=42"), "int call failed:\n{}", stdout);
+    assert!(stdout.contains("cb=42"), "callback failed:\n{}", stdout);
     assert!(
         stdout.contains("half=3.5"),
         "double call failed:\n{}",
