@@ -70,3 +70,93 @@ fn import_and_call_c_functions() {
         stdout
     );
 }
+
+/// Memory API (ADR-0021): pack a struct, hand it to C via `void*`, and read
+/// results back with `unpack` / `get-*`, plus a NULL `char*` error.
+#[test]
+fn pack_struct_and_pass_via_voidptr() {
+    let dir = std::env::temp_dir().join(format!("niilisp-ffi-mem-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let src = dir.join("m.c");
+    // Rec { int x; long y; } — x at 0, y at 8, size 16 under the native ABI.
+    std::fs::write(
+        &src,
+        "typedef struct { int x; long y; } Rec;\n\
+         long rec_sum(void* p){ Rec* r = (Rec*)p; return (long)r->x + r->y; }\n\
+         const char* label(void){ return \"packed\"; }\n\
+         const char* nullstr(void){ return 0; }\n",
+    )
+    .unwrap();
+
+    let (libname, kind) = if cfg!(target_os = "macos") {
+        ("libm2.dylib", "-dynamiclib")
+    } else {
+        ("libm2.so", "-shared")
+    };
+    let lib = dir.join(libname);
+    let status = Command::new("cc")
+        .args(["-fPIC", kind])
+        .arg(&src)
+        .arg("-o")
+        .arg(&lib)
+        .status()
+        .expect("failed to run cc");
+    assert!(status.success(), "cc did not build the test library");
+
+    let script = format!(
+        "(import \"{lib}\" \"rec_sum\" \"long\" \"void*\")\n\
+         (import \"{lib}\" \"label\" \"long\")\n\
+         (import \"{lib}\" \"nullstr\" \"long\")\n\
+         (struct 'Rec \"int\" \"long\")\n\
+         (setf buf (pack Rec 7 35))\n\
+         (println \"sum=\" (rec_sum buf))\n\
+         (println \"unpack=\" (unpack Rec buf))\n\
+         (println \"getint=\" (get-int (address 'buf)))\n\
+         (println \"getlong=\" (get-long (+ (address 'buf) 8)))\n\
+         (println \"label=\" (get-string (label)))\n\
+         (println \"null=\" (catch (get-string (nullstr)) 'e))\n",
+        lib = lib.display()
+    );
+
+    let bin = env!("CARGO_BIN_EXE_niilisp");
+    let output = Command::new(bin)
+        .arg("-e")
+        .arg(&script)
+        .output()
+        .expect("failed to run niilisp");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    let _ = std::fs::remove_dir_all(&dir);
+
+    assert!(
+        stdout.contains("sum=42"),
+        "void* struct call failed:\n{}",
+        stdout
+    );
+    assert!(
+        stdout.contains("unpack=(7 35)"),
+        "unpack roundtrip failed:\n{}",
+        stdout
+    );
+    assert!(
+        stdout.contains("getint=7"),
+        "address/get-int failed:\n{}",
+        stdout
+    );
+    assert!(
+        stdout.contains("getlong=35"),
+        "address/get-long failed:\n{}",
+        stdout
+    );
+    assert!(
+        stdout.contains("label=packed"),
+        "get-string failed:\n{}",
+        stdout
+    );
+    // A NULL char* through get-string errors; catch returns nil.
+    assert!(
+        stdout.contains("null=nil"),
+        "NULL get-string should error:\n{}",
+        stdout
+    );
+}

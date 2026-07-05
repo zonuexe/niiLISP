@@ -353,13 +353,27 @@ turns a niiLISP function into a C function pointer. Types are:
 (import "libm.so" "cos" "double" "double")   ; then (cos x)
 (import "lib" "fn" "ret" "argtype" …)        ; returns nil if it cannot resolve
 (callback 'f "ret" "argtype" …)              ; -> a C function-pointer address
+(struct 'Point "int" "int")                  ; name a struct layout
+(pack Point 3 4)                             ; -> a binary string (native C ABI)
+(unpack Point s)                             ; -> (3 4)
+(get-string addr) (get-int addr) …           ; read a C value at an address
+(address 'sym)                               ; buffer address of a symbol's string
 ```
 
 `char*` arguments are passed as a temporary NUL-terminated copy; a `char*`
 return is copied out to a string (NULL becomes `nil`); pointers are integers. A
 `throw`/error inside a callback is reported to stderr and does not cross the C
-boundary. FFI is Unix-only for now; the memory API (`pack`/`unpack`/`get-*`/
-`struct`) is _(planned)_.
+boundary.
+
+The memory API builds and reads C structs. `struct` names a layout (a list of C
+type names); `pack`/`unpack` convert between values and a binary string laid out
+as that C struct (natural alignment, padding, native byte order). `get-string`,
+`get-int`, `get-long`, `get-float` (a C `double`), and `get-char` read a C value
+at an integer address; `address` exposes a symbol-held string's stable buffer
+pointer (valid only while the symbol is not reassigned or resized). A packed
+struct is handed to C by passing the string to a `void*` argument (no copy). A
+NULL (0) pointer through `unpack`/`get-string` raises an error; other invalid
+addresses are undefined behaviour. FFI is Unix-only for now.
 
 ---
 

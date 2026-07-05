@@ -123,5 +123,21 @@ List construction semantics (array-backed values, no dotted pairs) are in
 | --- | --- |
 | `(import "lib" "fn" "ret" "arg"…)` | bind a C function; `nil` if unresolved |
 | `(callback 'func "ret" "arg"…)` | a C function pointer that calls `func` |
+| `(struct 'name "type"…)` | bind `name` to a struct layout (a list of C types) |
+| `(pack layout val…)` | serialise values to a binary string (native C ABI layout) |
+| `(unpack layout str)` | read a packed string back into a list of values |
+| `(get-string addr [len [limit]])` | read a C string at `addr` |
+| `(get-int addr)` `(get-long addr)` | read a 32-/64-bit integer at `addr` |
+| `(get-float addr)` `(get-char addr)` | read a C `double` / signed byte at `addr` |
+| `(address 'sym)` | stable buffer address of a symbol-held string |
 
 Types: `void int long float double char* void*`. See `syntax.md` §10.
+
+A packed struct is passed to C by handing the string to a `void*` argument (no
+copy, binary-safe, valid for the call). `pack`/`unpack` use the native C ABI
+layout — natural alignment, padding, and byte order — so a packed string is
+exactly what a C function accepts as that struct. A NULL (0) pointer through
+`unpack` (for a `char*` field) or `get-string` raises an error rather than
+dereferencing; other invalid addresses are undefined behaviour (the caller's
+risk, per ADR-0015). `address` is valid only while `sym` is neither reassigned
+nor resized.

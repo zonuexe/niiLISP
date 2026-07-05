@@ -38,6 +38,23 @@ impl CType {
             _ => return None,
         })
     }
+
+    /// Size in bytes under the native C ABI. `Void` has no size and is rejected
+    /// by struct-layout code before this is called.
+    fn size(self) -> usize {
+        match self {
+            CType::Void => 0,
+            CType::Int | CType::Float => 4,
+            CType::Long | CType::Double => 8,
+            CType::CharPtr | CType::VoidPtr => std::mem::size_of::<usize>(),
+        }
+    }
+
+    /// Natural alignment in bytes (equal to the size for these scalar/pointer
+    /// types on the platforms we support).
+    fn align(self) -> usize {
+        self.size().max(1)
+    }
 }
 
 /// A C function resolved through `import`: its declared signature plus (under the
@@ -93,7 +110,14 @@ impl ForeignFn {
                     cstrings.push(cs);
                     Scalar::Ptr(p)
                 }
-                CType::VoidPtr => Scalar::Ptr(to_i64(v)? as usize as *const c_void),
+                // A string is passed as a raw pointer to its bytes — no copy,
+                // binary-safe, valid for the duration of the call (ADR-0021).
+                // `args` outlives the call, so the buffer stays alive. Any other
+                // value is treated as an integer address.
+                CType::VoidPtr => match v {
+                    Value::Str(b) => Scalar::Ptr(b.as_ptr() as *const c_void),
+                    _ => Scalar::Ptr(to_i64(v)? as usize as *const c_void),
+                },
                 CType::Void => return Err(Signal::error("void is not a valid argument type")),
             };
             scalars.push(s);
@@ -357,11 +381,289 @@ fn b_callback(interp: &Interp, args: &[Value]) -> Result<Value, Signal> {
     Ok(Value::Int(code))
 }
 
+// ---- memory API: struct / pack / unpack / get-* / address (ADR-0021) ------
+
+/// Round `off` up to a multiple of `align` (a power of two).
+#[cfg(all(feature = "ffi", unix))]
+fn align_up(off: usize, align: usize) -> usize {
+    (off + align - 1) & !(align - 1)
+}
+
+/// Parse a struct layout — a niiLISP list of C type-name strings — into `CType`s,
+/// rejecting `void` (a struct field must have a size).
+#[cfg(all(feature = "ffi", unix))]
+fn layout_types(v: &Value) -> Result<Vec<CType>, Signal> {
+    let items = match v {
+        Value::List(items) => items,
+        _ => return Err(Signal::error("expected a struct (a list of C type names)")),
+    };
+    let mut types = Vec::with_capacity(items.len());
+    for it in items {
+        match it {
+            Value::Str(b) => {
+                let ct = parse_type(b)?;
+                if ct == CType::Void {
+                    return Err(Signal::error("struct field type cannot be void"));
+                }
+                types.push(ct);
+            }
+            _ => {
+                return Err(Signal::error(
+                    "struct layout must be a list of type strings",
+                ))
+            }
+        }
+    }
+    Ok(types)
+}
+
+/// Native-ABI field offsets and the padded total size for a struct layout.
+#[cfg(all(feature = "ffi", unix))]
+fn layout_offsets(types: &[CType]) -> (Vec<usize>, usize) {
+    let mut off = 0usize;
+    let mut max_align = 1usize;
+    let mut offsets = Vec::with_capacity(types.len());
+    for &ct in types {
+        let (size, align) = (ct.size(), ct.align());
+        max_align = max_align.max(align);
+        off = align_up(off, align);
+        offsets.push(off);
+        off += size;
+    }
+    (offsets, align_up(off, max_align))
+}
+
+/// `(struct 'name t…)` — bind `name` to the list of C type names `t…`. A struct
+/// is just that list (no new value type); `pack`/`unpack` consume it as a layout.
+#[cfg(all(feature = "ffi", unix))]
+fn b_struct(interp: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    let sym = match args.first() {
+        Some(Value::Symbol(id)) => *id,
+        _ => return Err(Signal::error("struct: first argument must be a symbol")),
+    };
+    let mut fields = Vec::with_capacity(args.len().saturating_sub(1));
+    for a in &args[1..] {
+        match a {
+            // Validate each name now so a bad type is caught at definition time.
+            Value::Str(b) => {
+                if parse_type(b)? == CType::Void {
+                    return Err(Signal::error("struct field type cannot be void"));
+                }
+                fields.push(Value::Str(b.clone()));
+            }
+            _ => return Err(Signal::error("struct: field types must be strings")),
+        }
+    }
+    let layout = Value::List(fields);
+    interp.set_global(sym, layout.clone());
+    Ok(layout)
+}
+
+/// `(pack layout val…)` — serialise `val…` to a binary string laid out as the C
+/// struct `layout` (native alignment, padding, byte order). Pointer fields
+/// (`char*`/`void*`) take an integer address.
+#[cfg(all(feature = "ffi", unix))]
+fn b_pack(_interp: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    let layout = args
+        .first()
+        .ok_or_else(|| Signal::error("pack: missing layout"))?;
+    let types = layout_types(layout)?;
+    let vals = &args[1..];
+    if vals.len() < types.len() {
+        return Err(Signal::error("pack: too few values for the struct layout"));
+    }
+    let (offsets, total) = layout_offsets(&types);
+    let mut buf = vec![0u8; total];
+    for (i, &ct) in types.iter().enumerate() {
+        let v = &vals[i];
+        let off = offsets[i];
+        let write =
+            |buf: &mut [u8], bytes: &[u8]| buf[off..off + bytes.len()].copy_from_slice(bytes);
+        match ct {
+            CType::Int => write(&mut buf, &(to_i64(v)? as i32).to_ne_bytes()),
+            CType::Long => write(&mut buf, &to_i64(v)?.to_ne_bytes()),
+            CType::Float => write(&mut buf, &(to_f64(v)? as f32).to_ne_bytes()),
+            CType::Double => write(&mut buf, &to_f64(v)?.to_ne_bytes()),
+            CType::CharPtr | CType::VoidPtr => {
+                write(&mut buf, &(to_i64(v)? as usize).to_ne_bytes())
+            }
+            CType::Void => unreachable!("layout_types rejects void"),
+        }
+    }
+    Ok(Value::Str(buf))
+}
+
+/// `(unpack layout str)` — the inverse of `pack`: read each field of `layout`
+/// from `str` and return the values as a list. A pointer field is dereferenced
+/// (`char*` -> the pointed-to C string); a NULL pointer raises an error.
+#[cfg(all(feature = "ffi", unix))]
+fn b_unpack(_interp: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    use std::ffi::CStr;
+    use std::os::raw::c_char;
+
+    let layout = args
+        .first()
+        .ok_or_else(|| Signal::error("unpack: missing layout"))?;
+    let types = layout_types(layout)?;
+    let bytes = match args.get(1) {
+        Some(Value::Str(b)) => b,
+        _ => return Err(Signal::error("unpack: second argument must be a string")),
+    };
+    let (offsets, total) = layout_offsets(&types);
+    if bytes.len() < total {
+        return Err(Signal::error(
+            "unpack: string is shorter than the struct layout",
+        ));
+    }
+    let read = |off: usize, n: usize| -> [u8; 8] {
+        let mut b = [0u8; 8];
+        b[..n].copy_from_slice(&bytes[off..off + n]);
+        b
+    };
+    let mut out = Vec::with_capacity(types.len());
+    for (i, &ct) in types.iter().enumerate() {
+        let off = offsets[i];
+        let v = match ct {
+            CType::Int => {
+                Value::Int(i32::from_ne_bytes(read(off, 4)[..4].try_into().unwrap()) as i64)
+            }
+            CType::Long => Value::Int(i64::from_ne_bytes(read(off, 8))),
+            CType::Float => {
+                Value::Float(f32::from_ne_bytes(read(off, 4)[..4].try_into().unwrap()) as f64)
+            }
+            CType::Double => Value::Float(f64::from_ne_bytes(read(off, 8))),
+            CType::VoidPtr => Value::Int(usize::from_ne_bytes(read(off, 8)) as i64),
+            CType::CharPtr => {
+                let addr = usize::from_ne_bytes(read(off, 8));
+                if addr == 0 {
+                    return Err(Signal::error("cannot convert NULL to string"));
+                }
+                // SAFETY: caller-supplied address; a non-NULL invalid pointer is
+                // UB, the caller's risk (ADR-0015). NULL is handled above.
+                let s = unsafe { CStr::from_ptr(addr as *const c_char).to_bytes().to_vec() };
+                Value::Str(s)
+            }
+            CType::Void => unreachable!("layout_types rejects void"),
+        };
+        out.push(v);
+    }
+    Ok(Value::List(out))
+}
+
+/// The integer address argument to a `get-*` builtin, rejecting NULL (0).
+#[cfg(all(feature = "ffi", unix))]
+fn get_addr(args: &[Value], what: &str) -> Result<usize, Signal> {
+    let addr = to_i64(args.first().unwrap_or(&Value::Nil))? as usize;
+    if addr == 0 {
+        return Err(Signal::error(if what == "string" {
+            "cannot convert NULL to string".to_string()
+        } else {
+            format!("get-{}: cannot read from NULL address", what)
+        }));
+    }
+    Ok(addr)
+}
+
+/// `(get-string addr [len [limit]])` — read a C string at `addr`. Without `len`,
+/// reads a NUL-terminated string; with `len`, reads up to `len` bytes, truncated
+/// at the first occurrence of `limit` if given. NULL (0) raises an error.
+#[cfg(all(feature = "ffi", unix))]
+fn b_get_string(_interp: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    use std::ffi::CStr;
+    use std::os::raw::c_char;
+
+    let addr = get_addr(args, "string")?;
+    let bytes = match args.get(1) {
+        // SAFETY: caller-supplied address; NULL handled above, other invalid
+        // addresses are UB (ADR-0015).
+        None => unsafe { CStr::from_ptr(addr as *const c_char).to_bytes().to_vec() },
+        Some(len_v) => {
+            let len = to_i64(len_v)?.max(0) as usize;
+            let slice = unsafe { std::slice::from_raw_parts(addr as *const u8, len) };
+            match args.get(2) {
+                Some(Value::Str(limit)) if !limit.is_empty() => {
+                    let end = slice
+                        .windows(limit.len())
+                        .position(|w| w == limit.as_slice())
+                        .unwrap_or(slice.len());
+                    slice[..end].to_vec()
+                }
+                _ => slice.to_vec(),
+            }
+        }
+    };
+    Ok(Value::Str(bytes))
+}
+
+/// Read a fixed-width C scalar at an integer address (NULL rejected).
+#[cfg(all(feature = "ffi", unix))]
+fn b_get_int(_interp: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    let addr = get_addr(args, "int")?;
+    // SAFETY: caller-supplied address; NULL handled, other invalid is UB.
+    Ok(Value::Int(
+        unsafe { (addr as *const i32).read_unaligned() } as i64
+    ))
+}
+
+#[cfg(all(feature = "ffi", unix))]
+fn b_get_long(_interp: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    let addr = get_addr(args, "long")?;
+    Ok(Value::Int(unsafe { (addr as *const i64).read_unaligned() }))
+}
+
+#[cfg(all(feature = "ffi", unix))]
+fn b_get_float(_interp: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    let addr = get_addr(args, "float")?;
+    // newLISP `get-float` reads a 64-bit C double.
+    Ok(Value::Float(unsafe {
+        (addr as *const f64).read_unaligned()
+    }))
+}
+
+#[cfg(all(feature = "ffi", unix))]
+fn b_get_char(_interp: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    let addr = get_addr(args, "char")?;
+    Ok(Value::Int(
+        unsafe { (addr as *const i8).read_unaligned() } as i64
+    ))
+}
+
+/// `(address 'sym)` — the stable buffer address of the string held by `sym`.
+/// Only a symbol-held string qualifies: a temporary's copy is dropped at once
+/// under ORO, so its address would dangle (ADR-0021). Caller must not resize or
+/// reassign `sym` while C holds the address.
+#[cfg(all(feature = "ffi", unix))]
+fn b_address(interp: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    let sym = match args.first() {
+        Some(Value::Symbol(id)) => *id,
+        _ => {
+            return Err(Signal::error(
+                "address: argument must be a symbol (a temporary's address would dangle)",
+            ))
+        }
+    };
+    interp.with_global(sym, |v| match v {
+        Some(Value::Str(b)) => Ok(Value::Int(b.as_ptr() as usize as i64)),
+        _ => Err(Signal::error(
+            "address: symbol does not hold a string buffer",
+        )),
+    })
+}
+
 /// Register FFI builtins. A no-op in a pure build.
 #[cfg(all(feature = "ffi", unix))]
 pub fn install(interp: &Interp) {
     interp.register_builtin("import", b_import);
     interp.register_builtin("callback", b_callback);
+    interp.register_builtin("struct", b_struct);
+    interp.register_builtin("pack", b_pack);
+    interp.register_builtin("unpack", b_unpack);
+    interp.register_builtin("get-string", b_get_string);
+    interp.register_builtin("get-int", b_get_int);
+    interp.register_builtin("get-long", b_get_long);
+    interp.register_builtin("get-float", b_get_float);
+    interp.register_builtin("get-char", b_get_char);
+    interp.register_builtin("address", b_address);
 }
 
 #[cfg(not(all(feature = "ffi", unix)))]

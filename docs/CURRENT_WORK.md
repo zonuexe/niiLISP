@@ -11,42 +11,36 @@ what is deliberately deferred, so work can resume without re-deriving context.
   semantics, FOOP with reference `self`, the reference/place model, `catch`/`throw`,
   and a core builtin set. Passes vendored `qa-exception` and `qa-foop`.
 - Since v0.1.0 (all on `master`, unreleased): **FFI `import`** (typed C calls,
-  ADR-0018/0019) and **`callback`** (ADR-0020); `case`/`if-not` promoted to full
-  special forms; a language spec under [`docs/spec/`](spec/) (syntax, types,
-  special-forms, functions).
-- Tests: 31 unit + 3 integration (`qa-exception`, `qa-foop`, hermetic `ffi`).
+  ADR-0018/0019), **`callback`** (ADR-0020), and the **FFI memory API**
+  (`struct`/`pack`/`unpack`/`get-*`/`address`, ADR-0021); `case`/`if-not`
+  promoted to full special forms; a language spec under [`docs/spec/`](spec/)
+  (syntax, types, special-forms, functions).
+- Tests: 31 unit + 5 integration (`qa-exception`, `qa-foop`, `qa-nullstring`,
+  and two hermetic `ffi` tests).
 
-## Next task — pick up here: FFI memory API slice
+## Next task — pick up here: FFI follow-ups, then bigint
 
-**Design is done ([ADR-0021](adr/0021-ffi-memory-api-slice.md)); implement it.**
-This is the third FFI slice; acceptance target is the vendored `qa-nullstring`.
-Build on the existing FFI module (`src/ffi.rs`, gated `cfg(all(feature = "ffi",
-unix))`), which already has `CType`, the `import` marshalling, and `callback`.
+The **FFI memory API slice is done** ([ADR-0021](adr/0021-ffi-memory-api-slice.md)):
+`struct`, `pack`/`unpack` (native C ABI layout), `get-string`/`get-int`/
+`get-long`/`get-float` (a C double)/`get-char`, and `address` (symbol-held
+strings only), plus `import`'s `void*` argument now accepts a string (passes its
+buffer pointer, no copy). NULL through `unpack`/`get-string` errors instead of
+crashing. `qa-nullstring` passes and is wired into `tests/qa.rs`.
 
-Implement these builtins (all `cfg(all(feature = "ffi", unix))`):
+Remaining FFI slices, then the next headline feature (roughly in order):
 
-- **`struct`** — `(struct 'name t…)` binds `name` to a list of C type names
-  (reuse `CType`; a struct is just a list of type strings, no new value type).
-- **`pack` / `unpack`** — `(pack layout val…)` -> a binary string; `(unpack
-  layout str)` -> a list. Use the **native C ABI layout** (natural alignment +
-  padding + native endianness), so packed bytes match a real C struct. Compute
-  per-field offsets from each `CType`'s size/align.
-- **`get-string` / `get-int` / `get-long` / `get-float` / `get-char`** — read a C
-  value at an integer address. **Check address 0 -> error** ("cannot convert NULL
-  to string"); other invalid addresses are UB (accepted, ADR-0015).
-- **`address`** — `(address 'sym)` returns the stable buffer address of a
-  **symbol-held** value. Reject `address` of an arbitrary temporary (dangles
-  under ORO). Invariant: caller must not resize/reassign while C holds it.
-- Extend `import`'s **`void*` argument to accept a string** and pass its buffer
-  pointer directly (no copy, binary-safe), valid for the call's duration — this
-  is how a packed struct is handed to C.
+- **`pack` format-char mini-language** — the terse `c b d lf n s …` layout syntax
+  with endian toggles (`>`/`<`), deferred from ADR-0021. `pack`/`unpack` currently
+  take a `struct` (list of type-name strings) only.
+- **`address` of scalars / write-through** — `address` today only exposes a
+  symbol-held *string* buffer. Symbol-held numbers have no separate buffer under
+  the current value model; revisit if a test needs write-through to a scalar.
+- **simple/untyped `import`** and **Windows FFI** (ADR-0018) — later.
+- **bigint** — `L` literals + `Value::Bigint`; unlocks `qa-bigint`, `qa-longnum`,
+  and the tail of `qa-factorfibo`. Likely the next headline after FFI.
 
-Then: a hermetic test (pack a struct, pass via `void*`, read back), and wire
-`qa-nullstring` into `tests/qa.rs` once it passes (it also needs `struct`/`pack`/
-`unpack`/`get-string` — check what else it references).
-
-**Gotcha (cost time this session):** cargo's incremental build went stale and
-silently reused an old binary, masking a compile error. If a change seems to have
+**Gotcha (cost time before):** cargo's incremental build can go stale and
+silently reuse an old binary, masking a compile error. If a change seems to have
 no effect, run `cargo clean -p niilisp` and confirm you see `Compiling niilisp`.
 
 ## Deferred optimizations (do after the language surface is more complete)
@@ -77,11 +71,11 @@ integration targets unlocked as their dependencies land.
   string-byte places (`(setf (s 3) "D")`), `eval`/loop place-returns,
   `upper-case`, `dostring`.
 - **`import` / FFI** (v2 headline, [ADR-0015](adr/0015-import-ffi.md)) — **done**:
-  typed `import` ([ADR-0019](adr/0019-ffi-first-slice.md)) and `callback`
-  ([ADR-0020](adr/0020-ffi-callback-slice.md)), Unix + system libffi
-  ([ADR-0018](adr/0018-ffi-build-and-packaging.md)). **Next: the memory API slice**
-  — designed in [ADR-0021](adr/0021-ffi-memory-api-slice.md), see the handoff at
-  the top. Later FFI slices: the terse `pack` format-char language, simple/untyped
+  typed `import` ([ADR-0019](adr/0019-ffi-first-slice.md)), `callback`
+  ([ADR-0020](adr/0020-ffi-callback-slice.md)), and the memory API
+  ([ADR-0021](adr/0021-ffi-memory-api-slice.md): `struct`/`pack`/`unpack`/`get-*`/
+  `address`), Unix + system libffi ([ADR-0018](adr/0018-ffi-build-and-packaging.md)).
+  Remaining FFI slices: the terse `pack` format-char language, simple/untyped
   `import`, and Windows FFI. `qa-libffi` additionally needs `exec`/`real-path`.
 - **bigint** — `L` literals + `Value::Bigint`; unlocks `qa-bigint`, `qa-longnum`,
   and the tail of `qa-factorfibo`.

@@ -26,6 +26,25 @@ fn qa_exception_passes() {
     );
 }
 
+/// The FFI memory-API slice (ADR-0021): NULL `char*` through `unpack` and
+/// `get-string` must error rather than segfault. Needs `struct`/`pack`/`unpack`/
+/// `get-string`, which are Unix-only and gated on the `ffi` feature.
+#[test]
+#[cfg(all(feature = "ffi", unix))]
+fn qa_nullstring_passes() {
+    let stdout = run_qa("qa-nullstring");
+    assert!(
+        stdout.contains("SUCCESS unpacking NULL ptr"),
+        "qa-nullstring unpack did not report success:\n{}",
+        stdout
+    );
+    assert!(
+        stdout.contains("SUCCESS get-string on NULL ptr"),
+        "qa-nullstring get-string did not report success:\n{}",
+        stdout
+    );
+}
+
 #[test]
 fn qa_foop_passes() {
     let stdout = run_qa("qa-foop");

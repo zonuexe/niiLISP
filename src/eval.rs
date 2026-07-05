@@ -153,6 +153,14 @@ impl Interp {
             .unwrap_or(Value::Nil)
     }
 
+    /// Run `f` with a borrow of the symbol's stored value (no clone), so the FFI
+    /// `address` builtin can read a symbol-held buffer's stable pointer without
+    /// the copy that `lookup` would make (ADR-0021).
+    #[cfg(all(feature = "ffi", unix))]
+    pub fn with_global<R>(&self, sym: SymId, f: impl FnOnce(Option<&Value>) -> R) -> R {
+        f(self.globals.borrow().get(&sym))
+    }
+
     pub fn repr(&self, v: &Value) -> String {
         to_repr(v, &self.interner.borrow())
     }
