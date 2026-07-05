@@ -5,12 +5,15 @@ what is deliberately deferred, so work can resume without re-deriving context.
 
 ## Status
 
-- **v0.1.0 released** (2026-07-04): on [crates.io](https://crates.io/crates/niilisp)
-  (`cargo install niilisp`) and as GitHub Release binaries for 5 platforms.
+- **v0.2.0 released** (2026-07-06): on [crates.io](https://crates.io/crates/niilisp)
+  (`cargo install niilisp`) and as GitHub Release binaries for 4 targets
+  (x86_64/aarch64 Linux + aarch64 macOS with FFI, x86_64 Windows pure). Ships the
+  whole arc below — FFI, bigint, arrays, copy-on-write, UTF-8 char ops,
+  contexts-as-namespaces, lambdas-as-list. (v0.1.0 was 2026-07-04.)
 - Working: reader, tree-walking evaluator, dynamic scope + contexts, ORO value
   semantics, FOOP with reference `self`, the reference/place model, `catch`/`throw`,
   and a core builtin set. Passes vendored `qa-exception` and `qa-foop`.
-- Since v0.1.0 (all on `master`, unreleased): **FFI `import`** (typed C calls,
+- Shipped in v0.2.0 (since v0.1.0): **FFI `import`** (typed C calls,
   ADR-0018/0019), **`callback`** (ADR-0020), the **FFI memory API**
   (`struct`/`pack`/`unpack`/`get-*`/`address`, ADR-0021), **bigint**
   (arbitrary-precision integers, ADR-0022), **arrays** (fixed-length,
