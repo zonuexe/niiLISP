@@ -217,6 +217,18 @@ fn incr_to_bigint(v: &Value) -> Result<BigInt, Signal> {
     }
 }
 
+/// Mangle a Dictionary key (a string or number) to a `_`-prefixed context
+/// symbol term (ADR-0030), mirroring newLISP's `makeSafeSymbol`. A number and
+/// its string form collapse to the same key.
+fn dict_key(v: &Value) -> String {
+    match v {
+        Value::Str(b) => format!("_{}", String::from_utf8_lossy(b)),
+        Value::Int(n) => format!("_{}", n),
+        Value::Float(f) => format!("_{}", *f as i64),
+        _ => "_".to_string(),
+    }
+}
+
 impl Interp {
     pub fn new() -> Self {
         let interp = Interp {
@@ -493,21 +505,111 @@ impl Interp {
         result
     }
 
-    /// Applying a context: call its default functor `Ctx:Ctx` if defined, else
-    /// build a symbol-tagged object list.
+    /// Applying a context, dispatched on its default functor `Ctx:Ctx`
+    /// (ADR-0030): a **lambda** is called (a FOOP constructor); **nil** makes the
+    /// context a Dictionary (hash access); any other non-nil value (the
+    /// predefined `Class` marker, copied to a FOOP class by `new`) builds a
+    /// symbol-tagged object list.
     fn construct(&self, ctx: SymId, arg_exprs: &[Value]) -> Result<Value, Signal> {
         let ctx_name = self.sym_name(ctx);
         let functor = self.intern(&format!("{}:{}", ctx_name, ctx_name));
-        if let Value::Lambda(l) = self.lookup(functor) {
-            let args = self.eval_args(arg_exprs)?;
-            return self.call_lambda(&l, args);
+        match self.lookup(functor) {
+            Value::Lambda(l) => {
+                let args = self.eval_args(arg_exprs)?;
+                self.call_lambda(&l, args)
+            }
+            Value::Nil => self.namespace_hash(ctx, arg_exprs),
+            _ => {
+                let mut obj = Vec::with_capacity(arg_exprs.len() + 1);
+                obj.push(Value::Symbol(ctx));
+                for e in arg_exprs {
+                    obj.push(self.eval(e)?);
+                }
+                Ok(Value::list(obj))
+            }
         }
-        let mut obj = Vec::with_capacity(arg_exprs.len() + 1);
-        obj.push(Value::Symbol(ctx));
-        for e in arg_exprs {
-            obj.push(self.eval(e)?);
+    }
+
+    /// Dictionary access on a nil-default-functor context (ADR-0030), mirroring
+    /// newLISP's `evaluateNamespaceHash`. Dispatches on the first argument's
+    /// type: a string/number key gets (one arg) or sets (two; a nil value
+    /// deletes); a list bulk-loads `(key value)` pairs; no args (or a nil first
+    /// arg) returns all associations, sorted.
+    fn namespace_hash(&self, ctx: SymId, arg_exprs: &[Value]) -> Result<Value, Signal> {
+        let ctx_name = self.sym_name(ctx);
+        if arg_exprs.is_empty() {
+            return Ok(self.dict_associations(&ctx_name));
         }
-        Ok(Value::list(obj))
+        match self.eval(&arg_exprs[0])? {
+            key @ (Value::Str(_) | Value::Int(_) | Value::Float(_)) => {
+                let sym = self.intern(&format!("{}:{}", ctx_name, dict_key(&key)));
+                if arg_exprs.len() >= 2 {
+                    let val = self.eval(&arg_exprs[1])?;
+                    // Storing nil removes the key (newLISP semantics).
+                    self.set_global(sym, val.clone());
+                    Ok(val)
+                } else {
+                    Ok(self.lookup(sym))
+                }
+            }
+            Value::List(pairs) => {
+                for pair in pairs.iter() {
+                    if let Value::List(kv) = pair {
+                        if kv.len() >= 2 {
+                            let sym = self.intern(&format!("{}:{}", ctx_name, dict_key(&kv[0])));
+                            self.set_global(sym, kv[1].clone());
+                        }
+                    }
+                }
+                Ok(Value::Context(ctx))
+            }
+            Value::Nil => Ok(self.dict_associations(&ctx_name)),
+            other => Err(Signal::Error(format!(
+                "dictionary: invalid key {}",
+                self.repr(&other)
+            ))),
+        }
+    }
+
+    /// All `(key value)` pairs of a Dictionary context, sorted by key (ADR-0030).
+    /// Keys are the `_`-prefixed member symbols with the prefix stripped, and
+    /// only live (non-nil) entries are included.
+    fn dict_associations(&self, ctx_name: &str) -> Value {
+        let mut out = Vec::new();
+        for (term, val) in self.context_entries(ctx_name) {
+            if let Some(key) = term.strip_prefix('_') {
+                out.push(Value::list(vec![Value::str(key.as_bytes().to_vec()), val]));
+            }
+        }
+        Value::list(out)
+    }
+
+    /// The live `(term, value)` members of a context, sorted by symbol name,
+    /// with the `Ctx:` prefix stripped from the term. Skips deleted (nil) slots.
+    pub fn context_entries(&self, ctx: &str) -> Vec<(String, Value)> {
+        let prefix = format!("{}:", ctx);
+        let ids = self.interner.borrow().context_symbols(ctx);
+        let mut out = Vec::new();
+        for id in ids {
+            let val = self.lookup(id);
+            if matches!(val, Value::Nil) {
+                continue;
+            }
+            let name = self.sym_name(id);
+            let term = name.strip_prefix(&prefix).unwrap_or(&name).to_string();
+            out.push((term, val));
+        }
+        out
+    }
+
+    /// The member symbol ids of a context (for `delete`).
+    pub fn context_symbol_ids(&self, ctx: &str) -> Vec<SymId> {
+        self.interner.borrow().context_symbols(ctx)
+    }
+
+    /// The number of bound global symbols, a rough cell count for `sys-info`.
+    pub fn global_count(&self) -> usize {
+        self.globals.borrow().len()
     }
 
     fn current_self(&self) -> Result<Place, Signal> {
@@ -2497,6 +2599,39 @@ mod tests {
                     (define (A:go) (:m (self) (:m (self 2) \"x\")) (self)) \
                     (= (:go a) '(A 1 (B 1)))";
         assert!(matches!(run(prog), Value::True));
+    }
+
+    #[test]
+    fn dictionary_hash_access() {
+        // qa-dictionary logic at small scale: get/set, bulk-load, enumerate,
+        // and delete-by-nil, over a nil-default-functor context (ADR-0030).
+        assert!(is_true(
+            "(context 'D) (context MAIN) \
+             (D \"a\" 1) (D \"b\" 2) \
+             (D (list (list \"c\" 3) (list \"d\" 4))) \
+             (and (= (D \"a\") 1) (= (D \"c\") 3) (= (D \"z\") nil) \
+                  (= (length (D)) 4) \
+                  (begin (D \"a\" nil) (and (= (D \"a\") nil) (= (length (D)) 3))))"
+        ));
+    }
+
+    #[test]
+    fn dictionary_enumeration_is_sorted() {
+        // `(D)` returns pairs sorted by key — the determinism `save` will need.
+        assert_eq!(
+            as_str(run(
+                "(context 'D) (context MAIN) (D \"b\" 2) (D \"a\" 1) (D \"c\" 3) \
+                 (join (map (fn (p) (p 0)) (D)) \",\")"
+            )),
+            "a,b,c"
+        );
+    }
+
+    #[test]
+    fn foop_construction_survives_dict_rewrite() {
+        // A FOOP class (non-nil functor via `new Class`) still builds a tagged
+        // object list, distinct from Dictionary access (ADR-0030).
+        assert!(is_true("(new Class 'P) (= (P 3 4) '(P 3 4))"));
     }
 
     #[test]

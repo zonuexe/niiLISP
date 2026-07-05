@@ -147,7 +147,10 @@ lookaround do not** (ADR-0028). Matching and offsets are byte-based.
 | `(eval expr)` | evaluate a value as code |
 | `(expand expr sym…)` | substitute the named symbols' values into `expr`; `(expand expr)` auto-substitutes upper-case symbols bound to code |
 | `(args [i])` | the current function's arguments not bound to a parameter, or the `i`th |
-| `(new prototype 'name)` | create a context (FOOP class) |
+| `(new prototype 'name)` | create a context, copying `prototype`'s symbols (its default functor `Proto:Proto` maps to `name:name`) |
+| `(delete 'sym)` | clear a symbol, or a whole context (all `Ctx:*`) for a bare context name |
+| `(sys-info [n])` | interpreter statistics (best-effort; element 0 ≈ live cells) |
+| `(randomize list)` | a shuffled copy of `list` |
 | `(term sym)` | a symbol's unqualified term (`(term 'L:a)` → `a`); see `context` |
 | `(print x…)` `(println x…)` | write to stdout (no quotes; `println` adds a newline) |
 | `(time-of-day)` | milliseconds since the epoch |
@@ -161,6 +164,25 @@ lookaround do not** (ADR-0028). Matching and offsets are byte-based.
 The RNG is a seedable xorshift generator shared across `rand`/`random`/`amb`;
 `(random offset scale)` is **uniform** (newLISP's exact distribution is not
 reproduced). `amb` is a special form (see `special-forms.md`).
+
+## Dictionaries (ADR-0030)
+
+A context whose default functor `Ctx:Ctx` is **nil** acts as a string/number-keyed
+**Dictionary** (hash). Applying it dispatches on the first argument:
+
+| Form | Meaning |
+| --- | --- |
+| `(Ctx key value)` | set `key` to `value` (a nil `value` deletes the key) |
+| `(Ctx key)` | get the value for `key`, or `nil` |
+| `(Ctx assoc-list)` | bulk-load a list of `(key value)` pairs; returns the context |
+| `(Ctx)` | all `(key value)` pairs, sorted by key |
+
+Keys are stored as context symbols named `_` + the key (so a Dictionary is a
+context of `_`-prefixed symbols, enumerable with `dotree` and — later — savable);
+a number key and its string form collapse to one entry. A context with a
+**non-nil** functor (a `lambda`, or the predefined `Class` marker copied by `new`)
+is a FOOP class instead: applying it constructs a tagged object list. See
+`special-forms.md` (`context`) and the FOOP notes.
 
 ## File I/O and filesystem (ADR-0029)
 

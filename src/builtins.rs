@@ -111,6 +111,9 @@ pub fn install(interp: &Interp) {
     reg("lookup", b_lookup);
     reg("assoc", b_assoc);
     reg("new", b_new);
+    reg("delete", b_delete);
+    reg("sys-info", b_sys_info);
+    reg("randomize", b_randomize);
     reg("starts-with", b_starts_with);
     reg("ends-with", b_ends_with);
     reg("upper-case", b_upper_case);
@@ -144,6 +147,21 @@ pub fn install(interp: &Interp) {
     reg("println", b_println);
     reg("string", b_string);
     reg("exit", b_exit);
+
+    // FOOP base context, predefined as in newLISP (ADR-0030). A non-nil default
+    // functor marks a context as a FOOP class (object construction); a nil
+    // functor leaves a context free to act as a Dictionary. `new` copies this
+    // marker to a derived class.
+    let class = interp.intern("Class");
+    interp.set_global(class, Value::Context(class));
+    let class_ctor = interp.intern("Class:Class");
+    interp.set_global(
+        class_ctor,
+        Value::Builtin(Builtin {
+            name: "Class:Class",
+            func: class_marker,
+        }),
+    );
 }
 
 // ---- numeric coercion ----------------------------------------------------
@@ -1389,14 +1407,103 @@ fn b_lookup(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
     Ok(Value::Nil)
 }
 
+fn sym_id(v: &Value) -> Option<SymId> {
+    match v {
+        Value::Symbol(id) | Value::Context(id) => Some(*id),
+        _ => None,
+    }
+}
+
 fn b_new(i: &Interp, args: &[Value]) -> Result<Value, Signal> {
-    // (new prototype 'name) — create a context. Prototype is ignored for now.
-    let name = match args.get(1).or_else(|| args.first()) {
-        Some(Value::Symbol(id)) | Some(Value::Context(id)) => *id,
-        _ => return Err(Signal::error("new: expected a context name symbol")),
+    // (new prototype 'name) copies the prototype context's symbols into a new
+    // context `name`; (new 'name) makes an empty one (ADR-0030). The default
+    // functor `Proto:Proto` maps to `name:name`, so copying `Class` gives the new
+    // context a non-nil functor and thus FOOP-class (not Dictionary) behaviour.
+    let (proto, name) = match (args.first(), args.get(1)) {
+        (Some(p), Some(n)) => (sym_id(p), sym_id(n)),
+        (Some(n), None) => (None, sym_id(n)),
+        _ => (None, None),
     };
+    let name = name.ok_or_else(|| Signal::error("new: expected a context name symbol"))?;
     i.set_global(name, Value::Context(name));
+    if let Some(proto) = proto {
+        let proto_name = i.sym_name(proto);
+        let new_name = i.sym_name(name);
+        if proto_name != new_name {
+            for (term, val) in i.context_entries(&proto_name) {
+                let new_term = if term == proto_name {
+                    new_name.clone()
+                } else {
+                    term
+                };
+                let sym = i.intern(&format!("{}:{}", new_name, new_term));
+                i.set_global(sym, val);
+            }
+        }
+    }
     Ok(Value::Context(name))
+}
+
+/// The predefined `Class:Class` default-functor marker (ADR-0030). Never called
+/// directly — `construct` treats any non-nil, non-lambda functor as an object
+/// constructor and builds the tagged list itself; the marker exists only to give
+/// a FOOP class a non-nil functor, distinguishing it from a Dictionary.
+fn class_marker(_: &Interp, _: &[Value]) -> Result<Value, Signal> {
+    Err(Signal::error(
+        "Class is a constructor; apply a derived context to build an object",
+    ))
+}
+
+/// `(delete 'sym)` — remove a symbol or, for a bare context name, the whole
+/// context (all `Ctx:*` members), by clearing the value(s) to nil (ADR-0030).
+fn b_delete(i: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    let id = match args.first() {
+        Some(Value::Symbol(id)) | Some(Value::Context(id)) => *id,
+        _ => return Err(Signal::error("delete: expected a symbol")),
+    };
+    let name = i.sym_name(id);
+    if name.contains(':') {
+        i.set_global(id, Value::Nil);
+    } else {
+        for sym in i.context_symbol_ids(&name) {
+            i.set_global(sym, Value::Nil);
+        }
+        i.set_global(id, Value::Nil);
+    }
+    Ok(Value::True)
+}
+
+/// `(sys-info [n])` — best-effort interpreter statistics (ADR-0030). Element 0 is
+/// a rough live-cell count; other slots are 0. Not a compatibility surface.
+fn b_sys_info(i: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    let cells = i.global_count() as i64;
+    let info = [cells, 0, cells, 0, 0, 0, 0, 0, 0, 0];
+    match args.first() {
+        Some(v) => {
+            let n = to_i64(v)?;
+            Ok(usize::try_from(n)
+                .ok()
+                .and_then(|k| info.get(k))
+                .map(|x| Value::Int(*x))
+                .unwrap_or(Value::Nil))
+        }
+        None => Ok(Value::list(info.iter().map(|x| Value::Int(*x)).collect())),
+    }
+}
+
+/// `(randomize list)` — a Fisher–Yates shuffle over the interpreter RNG,
+/// returning a new list (ORO).
+fn b_randomize(i: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    let mut v = match args.first() {
+        Some(Value::List(l)) => l.as_ref().clone(),
+        Some(Value::Nil) | None => return Ok(Value::list(Vec::new())),
+        _ => return Err(Signal::error("randomize: expected a list")),
+    };
+    for k in (1..v.len()).rev() {
+        let j = (i.rng_next_u64() % (k as u64 + 1)) as usize;
+        v.swap(k, j);
+    }
+    Ok(Value::list(v))
 }
 
 fn b_starts_with(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
