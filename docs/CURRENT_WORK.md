@@ -28,23 +28,46 @@ what is deliberately deferred, so work can resume without re-deriving context.
   `min`/`max`/`even?`/`odd?`/`flat`/`join`/`member`/`unique`/`true?`, and the
   `dostring`/`until`/`extend`/`swap` special forms.
 
-## Next task — pick up here: choose the next slice
+## Next task — pick up here: contexts as namespaces (ADR-0026)
 
-The FFI, bigint, array, copy-on-write, and UTF-8 char-ops arcs are all complete.
-Candidates for the next slice:
+**Design is done and grilled ([ADR-0026](adr/0026-contexts-as-namespaces.md));
+implement it.** Add the *current-context* switch so `(context 'X)` makes bare
+symbols read into `X` (`X:sym`), plus `dotree`/`term`. Target: `qa-utf8` runs end
+to end (its char ops are already in, ADR-0025).
 
-- **Contexts as namespaces/dictionaries** — beyond FOOP: `(context 'name)`
-  switching, `dotree` (iterate a context's symbols), `term`, symbol tables as
-  dictionaries. Unlocks `qa-dictionary` and most of `qa-utf8` (whose `dotree`
-  loop is the remaining gap now that char ops are in). Wants its own grilled ADR.
-- **Evaluator dispatch & call path** ([ADR-0017](adr/0017-evaluator-dispatch-and-call-path.md))
-  — the throughput lever for recursion-heavy code (`(tak 24 16 8)` ~0.82s);
-  SymId dispatch, dense symbol table, dispatch cache. Its own grilled ADR.
-- **UTF-8 follow-ups** (no current demand): Unicode case folding for
-  `upper-case`/`lower-case`, char-based `trim`, and `regex` over UTF-8 (the
-  `qa-utf8-*regex*` oracles). A later standard-library pass.
-- **qa-ref tail** — string-byte places (`(setf (s 3) "D")`), `eval`/loop
-  place-returns. Touches the place model; scope first.
+Build order — most of the work is in the **reader**; the evaluator barely
+changes (qualified data symbols are already flat-`globals` keys):
+
+1. **Primitive-name set** — `Interp` exposes the static set of MAIN primitives
+   (registered builtin names + the special-form names); computed once. Pass it
+   to the reader when reading a source.
+2. **Reader current-context** — the reader tracks a current context (starts
+   `MAIN`), recognises **top-level `(context 'X)` / `(context X)`** and switches
+   it. While the context is `X` ≠ `MAIN`, a bare symbol interns as `X:sym` unless
+   its name is in the primitive set. (Qualification applies everywhere, including
+   inside `quote`.)
+3. **`context` runtime special form** — registers `Value::Context(X)` (creating
+   if new), returns it, so `X` evaluates to its context and `dotree`/`(X …)` work.
+4. **`dotree`** special form — `(dotree (var ctx [bool]) body)`: iterate the
+   interner's symbols named `ctx:*` (name order); optional true `bool` skips
+   `_`-terms. Needs an interner enumeration-by-prefix method.
+5. **`term`** builtin — `(term sym)` → the term (after the last `:`) as a symbol.
+6. **Tests** — hermetic context tests (`(context 'L)` makes `set` create `L:sym`;
+   `dotree` enumerates; `term` strips the prefix; `MAIN` restore) and wire
+   `qa-utf8` into `tests/qa.rs`.
+
+**Known limitation (ADR-0026):** a runtime-defined MAIN symbol referenced bare
+from inside a context is mis-qualified (the reader only knows the static
+primitive set). `qa-utf8` does not hit this.
+
+**Deferred (qa-dictionary stays gated):** the dictionary API (`(Dict key)`,
+`(Dict assoc)`, `(Dict)`) and `save`/`load`/`delete`/`sys-info`/`randomize`/file
+I/O — a separate slice.
+
+Other candidates after this: **UTF-8 follow-ups** (Unicode case folding, char
+`trim`, `regex`); **qa-ref tail** (string-byte places, `eval`/loop
+place-returns). The evaluator dispatch optimisation ([ADR-0017](adr/0017-evaluator-dispatch-and-call-path.md))
+is intentionally **deferred** (premature optimisation).
 
 Note the RNG distribution for `(random offset scale)` is **uniform**, not
 newLISP's; fine for `qa-bigint` (invariant-based) but revisit if a future script

@@ -44,6 +44,10 @@ _Avoid_: "library", "package", "plugin"
 A newLISP namespace: a named table of symbols that owns its symbols' values. The default context is `MAIN`. Contexts double as the substrate for prototype-based objects (FOOP) and modules. niiLISP reproduces contexts as first-class namespaces.
 _Avoid_: "namespace" (use Context), "module", "package", "object"
 
+**Current context**:
+The context in effect while a source is read: `(context 'X)` makes `X` current so an unqualified symbol read after it is created in `X` (`X:sym`), except names that already exist as MAIN primitives. It is a **read-time** property — a symbol's context is fixed when read, not resolved at evaluation (ADR-0026). `MAIN` is the current context until switched.
+_Avoid_: "active namespace", "scope" (scope is dynamic binding, a different axis)
+
 **Dynamic scoping**:
 niiLISP's scoping rule, inherited from newLISP: a called function sees the caller's current bindings for any symbol it does not itself rebind. Bindings are established by saving a symbol's current value, installing a new one, and restoring it as evaluation unwinds. There is no lexical/closure capture.
 _Avoid_: "lexical scope", "closure environment"
