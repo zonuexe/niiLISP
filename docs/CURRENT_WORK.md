@@ -39,20 +39,39 @@ what is deliberately deferred, so work can resume without re-deriving context.
   `min`/`max`/`even?`/`odd?`/`flat`/`join`/`member`/`unique`/`true?`, and the
   `dostring`/`until`/`extend`/`swap` special forms.
 
-## Next task — pick up here: choose the next slice
+## Next task — pick up here: implement the grilled File I/O + Dictionary slices
 
-The regex + Unicode-case slice is **done** (ADR-0028); the character-based
-`dostring` slice is **done** (unlocked `qa-utf8-ext`). Candidates, roughly by
-value:
+A gap analysis vs newLISP ([`notes/20260706_newlisp-gap-analysis.md`](notes/20260706_newlisp-gap-analysis.md))
+found ~221 of 378 primitives missing, clustered into whole unbuilt subsystems
+(file I/O, processes, networking, XML/JSON, dates). **North star decided (grilled):
+order by dependency, not by the GUI** — the *Graphical interface* chapter stays a
+long-horizon target we do **not** schedule (newLISP-GS needs process + net + a
+Java `guiserver.jar`; its `eval-string`-driven socket substrate is three unbuilt
+subsystems). Near term we build the shared foundation the GUI *also* needs.
 
-- **Dictionary API + persistence** — `(Dict key)` / `(Dict assoc)` / `(Dict)`
-  over contexts, plus `save`/`load`/`delete`/`sys-info`/`randomize`/file I/O.
-  Unlocks `qa-dictionary`. Its own grilled ADR (file I/O is the big piece).
-- **qa-ref tail** — string-byte places (`(setf (s 3) "D")`), `eval`/loop
-  place-returns. Touches the place model; scope first.
-- **`bits`** — integer-to-binary-string builtin. Small; not needed by any wired
-  oracle (`qa-utf8-ext`'s `bits` lines are commented out), so low priority until
-  a target requires it.
+Two slices are **fully grilled with ADRs and ready to implement**, in order:
+
+1. **File I/O — slice 1** ([ADR-0029](adr/0029-file-io-slice.md)): raw I/O +
+   filesystem ops (`open`/`close`/`read-buffer`/`write-buffer`/`read-line`/
+   `read-file`/`write-file`/`append-file`/`seek` + `directory`/`real-path`/
+   `make-dir`/`remove-dir`/`change-dir`/`rename-file`/`delete-file`/`file-info` +
+   `file?`/`directory?`/`exists`/`env`). Opaque integer handles from an interp
+   registry (0/1/2 reserved), nil-on-failure, always-on (no feature), byte-buffer
+   paths → OS-native. Acceptance: **`qa-lfs`**. (`qa-utf16path` = Windows/deferred;
+   `qa-local-domain` = networking, not file I/O.)
+2. **Dictionary core** ([ADR-0030](adr/0030-dictionary-context-as-hash.md)):
+   predefine `Class:Class`, rewrite context-apply so a **nil** default functor →
+   hash access (get/set/bulk/enumerate/delete), keys as `_`-prefixed context
+   symbols (`makeSafeSymbol`), `(context)` 0-arg, plus `sys-info`/`randomize`.
+   Removes the implicit-construction fallback. Verified by a unit test of the
+   `qa-dictionary` logic.
+3. **File I/O — slice 2 (persistence)**: `save`/`load`/`source` — a deterministic,
+   sorted, round-trippable source serialisation **driven by the dictionary's real
+   data**. Wire **`qa-dictionary`** once this lands.
+
+Lower-priority independent leaves (schedule when a target needs them): **qa-ref
+tail** (string-byte places, `eval`/loop place-returns — touches the place model),
+**`bits`** (small; no wired oracle needs it), XML/JSON, dates, matrix/stats math.
 
 The evaluator dispatch optimisation ([ADR-0017](adr/0017-evaluator-dispatch-and-call-path.md))
 stays intentionally **deferred** (premature optimisation).
