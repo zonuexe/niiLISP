@@ -110,8 +110,10 @@ fn run_source(interp: &Interp, src: &[u8]) -> Result<(), String> {
 
 /// Read all forms, keeping the interner borrow scoped so evaluation can proceed.
 fn read_forms(interp: &Interp, src: &[u8]) -> Result<Vec<Value>, String> {
+    // Collect the MAIN primitive names before borrowing the interner (ADR-0026).
+    let primitives = interp.primitive_names();
     let mut interner = interp.interner.borrow_mut();
-    let mut reader = Reader::new(src, &mut interner);
+    let mut reader = Reader::new(src, &mut interner, &primitives);
     reader.read_all()
 }
 

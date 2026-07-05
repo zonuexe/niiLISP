@@ -126,4 +126,19 @@ impl Interner {
     pub fn name(&self, id: SymId) -> &str {
         &self.names[id]
     }
+
+    /// The interned symbols of context `ctx` (names `ctx:…`), in name order —
+    /// for `dotree` (ADR-0026).
+    pub fn context_symbols(&self, ctx: &str) -> Vec<SymId> {
+        let prefix = format!("{}:", ctx);
+        let mut out: Vec<SymId> = self
+            .names
+            .iter()
+            .enumerate()
+            .filter(|(_, n)| n.starts_with(&prefix))
+            .map(|(i, _)| i as SymId)
+            .collect();
+        out.sort_by(|&a, &b| self.names[a].cmp(&self.names[b]));
+        out
+    }
 }

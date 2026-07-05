@@ -72,6 +72,7 @@ pub fn install(interp: &Interp) {
     reg("nth", b_nth);
     reg("length", b_length);
     reg("utf8len", b_utf8len);
+    reg("term", b_term);
     reg("append", b_append);
     reg("sequence", b_sequence);
     reg("map", b_map);
@@ -721,6 +722,19 @@ fn b_nth(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
         // Character indexing on a string (ADR-0025).
         Value::Str(b) => Ok(str_nth_char(b, idx)),
         _ => Err(Signal::error("nth: expected a list")),
+    }
+}
+
+/// `(term sym)` — the symbol's term (the part after the last `:`) as a symbol;
+/// `(term 'L:Albanian)` -> `Albanian` (ADR-0026).
+fn b_term(interp: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    match args.first() {
+        Some(Value::Symbol(id)) | Some(Value::Context(id)) => {
+            let name = interp.sym_name(*id);
+            let term = name.rsplit(':').next().unwrap_or(&name);
+            Ok(Value::Symbol(interp.intern(term)))
+        }
+        _ => Err(Signal::error("term: expected a symbol")),
     }
 }
 

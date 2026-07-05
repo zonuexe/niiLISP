@@ -104,6 +104,25 @@ fn qa_longnum_passes() {
     );
 }
 
+/// The multilingual UTF-8 display test: builds strings in a context `L`, then
+/// `(dotree (l L) (println (term l) ":" (eval l)))`. Exercises context switching
+/// (ADR-0026), `dotree`/`term`, and character-oriented string handling (ADR-0025).
+#[test]
+fn qa_utf8_passes() {
+    let stdout = run_qa("qa-utf8");
+    assert!(
+        stdout.contains("Tested UTF-8 font and display performance"),
+        "qa-utf8 did not finish:\n{}",
+        stdout
+    );
+    // A round-tripped multi-byte string is displayed, not mangled.
+    assert!(
+        stdout.contains("Japanese:"),
+        "qa-utf8 did not render the context's entries:\n{}",
+        stdout
+    );
+}
+
 #[test]
 fn qa_foop_passes() {
     let stdout = run_qa("qa-foop");

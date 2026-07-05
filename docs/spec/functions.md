@@ -141,6 +141,7 @@ boundaries, while byte-oriented ops (`slice`, the implicit slice `(i str)`,
 | --- | --- |
 | `(eval expr)` | evaluate a value as code |
 | `(new prototype 'name)` | create a context (FOOP class) |
+| `(term sym)` | a symbol's unqualified term (`(term 'L:a)` → `a`); see `context` |
 | `(print x…)` `(println x…)` | write to stdout (no quotes; `println` adds a newline) |
 | `(time-of-day)` | milliseconds since the epoch |
 | `(set-locale ["C"])` | locale (currently a no-op returning `"C"`) |

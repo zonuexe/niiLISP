@@ -294,6 +294,15 @@ first. Returns the last `body` result (or `nil` if it never runs).
 
 Binds `var` to `0 … count-1`.
 
+### `dotree` — iterate a context's symbols
+
+```
+(dotree (var ctx [only-top]) body)
+```
+
+Binds `var` to each symbol of context `ctx` (names `ctx:…`), in name order. A
+truthy `only-top` skips symbols whose term starts with `_`. See `context`.
+
 ### `amb` — random choice
 
 ```
@@ -313,6 +322,22 @@ shared seedable RNG (`seed`).
 Destructively appends to the string or list held in `place` and returns the new
 value: strings concatenate, lists splice each argument's elements. An unset
 (`nil`) place becomes a string when every argument is a string, else a list.
+
+---
+
+## Namespaces
+
+### `context` — switch the current context
+
+```
+(context 'X)   (context X)
+```
+
+Makes `X` the current context (creating it if new) and returns it. This is a
+**read-time** effect: unqualified symbols read after a top-level `(context 'X)`
+are created in `X` as `X:sym`, except names that are MAIN primitives (builtins /
+special forms). `(context MAIN)` returns to the default. See `dotree` and the
+`term` function; `types.md` covers contexts as a value.
 
 ---
 

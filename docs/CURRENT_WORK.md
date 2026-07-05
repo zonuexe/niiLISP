@@ -15,65 +15,57 @@ what is deliberately deferred, so work can resume without re-deriving context.
   (`struct`/`pack`/`unpack`/`get-*`/`address`, ADR-0021), **bigint**
   (arbitrary-precision integers, ADR-0022), **arrays** (fixed-length,
   ADR-0023), **copy-on-write values** (`Rc`/`make_mut`, ADR-0024), and
-  **UTF-8 character operations** (ADR-0025); `case`/`if-not` promoted to full
-  special forms; a language spec under [`docs/spec/`](spec/) (syntax, types,
+  **UTF-8 character operations** (ADR-0025), and **contexts as switchable
+  namespaces** (`context`/`dotree`/`term`, ADR-0026); `case`/`if-not` promoted to
+  full special forms; a language spec under [`docs/spec/`](spec/) (syntax, types,
   special-forms, functions).
-- Tests: 58 unit + 8 integration (`qa-exception`, `qa-foop`, `qa-nullstring`,
-  `qa-bigint`, `qa-longnum`, `qa-factorfibo` [`#[ignore]`d — slow sieve], and two
-  hermetic `ffi` tests); the suite passes under both default features and
-  `--no-default-features`.
+- Tests: 59 unit + 9 integration (`qa-exception`, `qa-foop`, `qa-nullstring`,
+  `qa-bigint`, `qa-longnum`, `qa-utf8`, `qa-factorfibo` [`#[ignore]`d — slow
+  sieve], and two hermetic `ffi` tests); the suite passes under both default
+  features and `--no-default-features`.
 - Standard-library fill-ins (byte-based, no UTF-8 dependency): string builtins
   `upper-case`/`lower-case`/`trim`/`slice`/`find`/`explode`/`chop`, the RNG
   (`seed`/`rand`/`random`/`amb`), `main-args`, the list/number builtins
   `min`/`max`/`even?`/`odd?`/`flat`/`join`/`member`/`unique`/`true?`, and the
   `dostring`/`until`/`extend`/`swap` special forms.
 
-## Next task — pick up here: contexts as namespaces (ADR-0026)
+## Next task — pick up here: choose the next slice
 
-**Design is done and grilled ([ADR-0026](adr/0026-contexts-as-namespaces.md));
-implement it.** Add the *current-context* switch so `(context 'X)` makes bare
-symbols read into `X` (`X:sym`), plus `dotree`/`term`. Target: `qa-utf8` runs end
-to end (its char ops are already in, ADR-0025).
+The FFI, bigint, array, copy-on-write, UTF-8 char-ops, and contexts-as-namespaces
+arcs are all complete. Candidates, roughly by value:
 
-Build order — most of the work is in the **reader**; the evaluator barely
-changes (qualified data symbols are already flat-`globals` keys):
+- **UTF-8 follow-ups** (the other half of the string arc): Unicode case folding
+  for `upper-case`/`lower-case` (currently ASCII), char-based `trim`, and
+  `regex` over UTF-8 (the `qa-utf8-*regex*` oracles). Regex is a big sub-feature
+  and wants its own grilled ADR; the case/trim upgrades are a smaller library
+  pass.
+- **Dictionary API + persistence** — `(Dict key)` / `(Dict assoc)` / `(Dict)`
+  over contexts, plus `save`/`load`/`delete`/`sys-info`/`randomize`/file I/O.
+  Unlocks `qa-dictionary`. Its own grilled ADR (file I/O is the big piece).
+- **qa-ref tail** — string-byte places (`(setf (s 3) "D")`), `eval`/loop
+  place-returns. Touches the place model; scope first.
 
-1. **Primitive-name set** — `Interp` exposes the static set of MAIN primitives
-   (registered builtin names + the special-form names); computed once. Pass it
-   to the reader when reading a source.
-2. **Reader current-context** — the reader tracks a current context (starts
-   `MAIN`), recognises **top-level `(context 'X)` / `(context X)`** and switches
-   it. While the context is `X` ≠ `MAIN`, a bare symbol interns as `X:sym` unless
-   its name is in the primitive set. (Qualification applies everywhere, including
-   inside `quote`.)
-3. **`context` runtime special form** — registers `Value::Context(X)` (creating
-   if new), returns it, so `X` evaluates to its context and `dotree`/`(X …)` work.
-4. **`dotree`** special form — `(dotree (var ctx [bool]) body)`: iterate the
-   interner's symbols named `ctx:*` (name order); optional true `bool` skips
-   `_`-terms. Needs an interner enumeration-by-prefix method.
-5. **`term`** builtin — `(term sym)` → the term (after the last `:`) as a symbol.
-6. **Tests** — hermetic context tests (`(context 'L)` makes `set` create `L:sym`;
-   `dotree` enumerates; `term` strips the prefix; `MAIN` restore) and wire
-   `qa-utf8` into `tests/qa.rs`.
+The evaluator dispatch optimisation ([ADR-0017](adr/0017-evaluator-dispatch-and-call-path.md))
+stays intentionally **deferred** (premature optimisation).
 
-**Known limitation (ADR-0026):** a runtime-defined MAIN symbol referenced bare
-from inside a context is mis-qualified (the reader only knows the static
-primitive set). `qa-utf8` does not hit this.
-
-**Deferred (qa-dictionary stays gated):** the dictionary API (`(Dict key)`,
-`(Dict assoc)`, `(Dict)`) and `save`/`load`/`delete`/`sys-info`/`randomize`/file
-I/O — a separate slice.
-
-Other candidates after this: **UTF-8 follow-ups** (Unicode case folding, char
-`trim`, `regex`); **qa-ref tail** (string-byte places, `eval`/loop
-place-returns). The evaluator dispatch optimisation ([ADR-0017](adr/0017-evaluator-dispatch-and-call-path.md))
-is intentionally **deferred** (premature optimisation).
+**Known limitation of contexts (ADR-0026):** a runtime-defined MAIN symbol
+referenced bare from inside a context is mis-qualified (the reader knows only the
+static primitive set, not runtime MAIN definitions). No current target hits this;
+perfect fidelity would need read/eval interleaving.
 
 Note the RNG distribution for `(random offset scale)` is **uniform**, not
 newLISP's; fine for `qa-bigint` (invariant-based) but revisit if a future script
 depends on the exact distribution.
 
 ## Done since v0.1.0
+
+**Contexts as switchable namespaces** ([ADR-0026](adr/0026-contexts-as-namespaces.md)):
+the reader tracks a current context set by top-level `(context 'X)` and qualifies
+bare symbols as `X:sym` (except MAIN primitives) — a read-time effect. `dotree`
+iterates a context's symbols, `term` strips the prefix. Mostly reader work; the
+evaluator's `lookup`/`set` were unchanged (qualified symbols are flat-`globals`
+keys). **`qa-utf8` passes** and is wired in. Deferred: the dictionary API and
+persistence (`qa-dictionary` stays gated).
 
 **UTF-8 character operations** ([ADR-0025](adr/0025-utf8-character-operations.md)):
 a lenient decode layer (`src/utf8.rs`) over the binary-safe byte storage; `utf8len`

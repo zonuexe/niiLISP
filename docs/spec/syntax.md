@@ -413,6 +413,9 @@ list see [`functions.md`](functions.md).
   `nth`/`first`/`rest`/`last`/`explode` are character-based; `slice`/`length`
   byte-based (ADR-0025).
 - **Random**: `seed rand random amb` (a shared seedable generator).
+- **Namespaces**: `context` (switch the current context), `dotree` (iterate a
+  context's symbols), `term` (a symbol's unqualified name); see
+  [`special-forms.md`](special-forms.md).
 - **I/O / misc**: `print println`, `time-of-day`, `set-locale`, `main-args`,
   `exit`, `eval`,
   `new`.

@@ -29,6 +29,61 @@ impl Signal {
     }
 }
 
+/// Names dispatched as special forms (evaluated by `try_special_form`). Together
+/// with the registered builtins they form the MAIN primitives that the reader
+/// keeps unqualified inside a context (ADR-0026). Keep in sync with the match in
+/// `try_special_form`.
+pub const SPECIAL_FORMS: &[&str] = &[
+    "quote",
+    "if",
+    "if-not",
+    "cond",
+    "case",
+    "and",
+    "or",
+    "while",
+    "when",
+    "unless",
+    "dotimes",
+    "for",
+    "dolist",
+    "dostring",
+    "dotree",
+    "context",
+    "until",
+    "amb",
+    "extend",
+    "local",
+    "inc",
+    "dec",
+    "++",
+    "--",
+    "push",
+    "pop",
+    "swap",
+    "reverse",
+    "sort",
+    "rotate",
+    "replace",
+    "set-ref",
+    "set-ref-all",
+    "begin",
+    "define",
+    "set",
+    "setq",
+    "setf",
+    "constant",
+    "self",
+    "time",
+    "let",
+    "lambda",
+    "fn",
+    "lambda-macro",
+    "define-macro",
+    "catch",
+    "throw",
+];
+
 /// The interpreter state. Methods take `&self`; mutable state lives behind
 /// `RefCell` (ADR-0006's interior mutability) so scope guards can borrow it.
 pub struct Interp {
@@ -186,6 +241,22 @@ impl Interp {
         let prev = *state;
         *state = if seed == 0 { 1 } else { seed };
         prev
+    }
+
+    /// The MAIN primitive names — registered builtins plus special forms — that
+    /// the reader keeps unqualified inside a context (ADR-0026). Computed from
+    /// the current globals, so call it after `Interp::new` has installed them.
+    pub fn primitive_names(&self) -> HashSet<String> {
+        let mut set: HashSet<String> = self
+            .globals
+            .borrow()
+            .keys()
+            .map(|&id| self.sym_name(id))
+            .collect();
+        for &sf in SPECIAL_FORMS {
+            set.insert(sf.to_string());
+        }
+        set
     }
 
     /// Register a primitive under `name`. Used by the FFI module (ADR-0019).
@@ -527,6 +598,8 @@ impl Interp {
             "for" => self.sf_for(args),
             "dolist" => self.sf_dolist(args),
             "dostring" => self.sf_dostring(args),
+            "dotree" => self.sf_dotree(args),
+            "context" => self.sf_context(args),
             "until" => self.sf_until(args),
             "amb" => self.sf_amb(args),
             "extend" => self.sf_extend(args),
@@ -940,6 +1013,85 @@ impl Interp {
                     break;
                 }
             }
+            result = self.eval_body(&args[1..])?;
+        }
+        Ok(result)
+    }
+
+    fn sf_context(&self, args: &[Value]) -> Result<Value, Signal> {
+        // (context 'X) / (context X). The reader has already switched the current
+        // context for symbol qualification (ADR-0026); at runtime we register the
+        // context value so `X` evaluates to it (for dotree etc.), and return it.
+        let cid = self.context_target(args.first())?;
+        if self.sym_name(cid) != "MAIN" && !matches!(self.lookup(cid), Value::Context(_)) {
+            self.set_global(cid, Value::Context(cid));
+        }
+        Ok(Value::Context(cid))
+    }
+
+    /// The context symbol named by a `(context …)` argument: `'X`, bare `X`, or a
+    /// value that evaluates to a context. Context names are MAIN-level, so any
+    /// context prefix on the name is stripped to its term (ADR-0026).
+    fn context_target(&self, arg: Option<&Value>) -> Result<SymId, Signal> {
+        let arg = arg.ok_or_else(|| Signal::error("context: missing name"))?;
+        let name = match arg {
+            Value::Symbol(id) => self.sym_name(*id),
+            Value::List(l)
+                if l.len() == 2
+                    && matches!(&l[0], Value::Symbol(s) if self.sym_name(*s) == "quote") =>
+            {
+                match &l[1] {
+                    Value::Symbol(id) => self.sym_name(*id),
+                    _ => return Err(Signal::error("context: bad name")),
+                }
+            }
+            other => match self.eval(other)? {
+                Value::Context(id) => return Ok(id),
+                Value::Symbol(id) => self.sym_name(id),
+                _ => return Err(Signal::error("context: expected a context name")),
+            },
+        };
+        let term = name.rsplit(':').next().unwrap_or(&name).to_string();
+        Ok(self.intern(&term))
+    }
+
+    fn sf_dotree(&self, args: &[Value]) -> Result<Value, Signal> {
+        // (dotree (var ctx [only-toplevel]) body...) — bind var to each symbol of
+        // context ctx (ADR-0026), in name order.
+        let spec = match args.first() {
+            Some(Value::List(s)) if s.len() >= 2 => s,
+            _ => return Err(Signal::error("dotree: expected (var context)")),
+        };
+        let var = match &spec[0] {
+            Value::Symbol(id) => *id,
+            _ => return Err(Signal::error("dotree: expected a loop variable")),
+        };
+        let ctx_name = match self.eval(&spec[1])? {
+            Value::Context(id) | Value::Symbol(id) => self.sym_name(id),
+            other => {
+                return Err(Signal::Error(format!(
+                    "dotree: expected a context, got {}",
+                    self.repr(&other)
+                )))
+            }
+        };
+        let only_toplevel = match spec.get(2) {
+            Some(e) => self.eval(e)?.is_truthy(),
+            None => false,
+        };
+        let syms = self.interner.borrow().context_symbols(&ctx_name);
+
+        let mut scope = Scope::new(self);
+        scope.bind(var, Value::Nil);
+        let mut result = Value::Nil;
+        for sym in syms {
+            if only_toplevel {
+                let name = self.sym_name(sym);
+                if name.rsplit(':').next().unwrap_or(&name).starts_with('_') {
+                    continue;
+                }
+            }
+            self.set_global(var, Value::Symbol(sym));
             result = self.eval_body(&args[1..])?;
         }
         Ok(result)
@@ -1897,9 +2049,12 @@ mod tests {
     /// Read and evaluate `src`, returning the value of the last form.
     fn run(src: &str) -> Value {
         let interp = Interp::new();
+        let prims = interp.primitive_names();
         let forms = {
             let mut it = interp.interner.borrow_mut();
-            Reader::new(src.as_bytes(), &mut it).read_all().unwrap()
+            Reader::new(src.as_bytes(), &mut it, &prims)
+                .read_all()
+                .unwrap()
         };
         let mut last = Value::Nil;
         for f in &forms {
@@ -2333,6 +2488,27 @@ mod tests {
             "(set 'x 100000000000000000000L) (++ x 5) (= x 100000000000000000005L)"
         ));
         assert!(is_true("(set 'x 5L) (-- x 2L) (= x 3L)"));
+    }
+
+    #[test]
+    fn contexts_as_namespaces() {
+        // (context 'L) makes `set` create L:sym; MAIN restore leaves x in MAIN.
+        assert!(is_true(
+            "(context 'L) (set 'greeting \"hi\") (context MAIN) \
+             (and (= L:greeting \"hi\") (symbol? 'L:greeting))"
+        ));
+        // dotree iterates the context's symbols; term strips the prefix.
+        assert!(is_true(
+            "(context 'D) (set 'a 1) (set 'b 2) (context MAIN) \
+             (set 'sum 0) (dotree (s D) (set 'sum (+ sum (eval s)))) (= sum 3)"
+        ));
+        assert!(is_true("(= (term 'Foo:bar) 'bar)"));
+        assert!(is_true("(= (term 'plain) 'plain)"));
+        // A builtin used inside a context stays the MAIN primitive.
+        assert_eq!(
+            as_int(run("(context 'E) (set 'n (+ 2 3)) (context MAIN) E:n")),
+            5
+        );
     }
 
     #[test]

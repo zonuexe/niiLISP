@@ -86,3 +86,13 @@ ordinary keys in the flat `globals`, so existing `lookup`/`set` handle them.
 - The interner needs an enumeration-by-context-prefix method for `dotree`.
 - The dictionary API and persistence remain deferred; `qa-dictionary` is gated on
   them, not on this slice.
+
+## Outcome
+
+Implemented as designed: the reader gained the current-context tracking,
+`(context …)`-argument qualification suppression, and the primitive-name set
+(`Interp::primitive_names`, built from `SPECIAL_FORMS` + registered builtins);
+`context`/`dotree` are special forms and `term` a builtin; the interner
+enumerates a context's symbols by prefix. The evaluator's `lookup`/`set` were
+unchanged. **`qa-utf8` now passes** and is wired into `tests/qa.rs` (it renders
+the multilingual strings via `dotree`/`term`/`eval`). Existing tests are green.

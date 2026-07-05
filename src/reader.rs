@@ -6,24 +6,38 @@
 //! bigint literals are recognised as reserved syntax and rejected with a clear
 //! error (bigint is deferred past v1).
 
+use std::collections::HashSet;
+
 use crate::value::{Interner, SymId, Value};
 
 pub struct Reader<'a> {
     src: &'a [u8],
     pos: usize,
     interner: &'a mut Interner,
+    /// The MAIN primitive names kept unqualified inside a context (ADR-0026).
+    primitives: &'a HashSet<String>,
+    /// The current context: bare symbols read while this is not `MAIN` are
+    /// qualified with it. Switched by top-level `(context …)` forms.
+    current_ctx: String,
+    /// Set while reading the arguments of a `(context …)` form, so a context
+    /// name is read unqualified (context names are MAIN-level).
+    suppress_qualify: bool,
 }
 
 impl<'a> Reader<'a> {
-    pub fn new(src: &'a [u8], interner: &'a mut Interner) -> Self {
+    pub fn new(src: &'a [u8], interner: &'a mut Interner, primitives: &'a HashSet<String>) -> Self {
         Reader {
             src,
             pos: 0,
             interner,
+            primitives,
+            current_ctx: "MAIN".to_string(),
+            suppress_qualify: false,
         }
     }
 
-    /// Read every top-level form in the source.
+    /// Read every top-level form in the source. A top-level `(context …)` form
+    /// switches the current context for the forms that follow (ADR-0026).
     pub fn read_all(&mut self) -> Result<Vec<Value>, String> {
         let mut forms = Vec::new();
         loop {
@@ -31,9 +45,42 @@ impl<'a> Reader<'a> {
             if self.pos >= self.src.len() {
                 break;
             }
-            forms.push(self.read_form()?);
+            let form = self.read_form()?;
+            if let Some(ctx) = self.context_switch(&form) {
+                self.current_ctx = ctx;
+            }
+            forms.push(form);
         }
         Ok(forms)
+    }
+
+    /// If `form` is a `(context 'X)` / `(context X)` call, the new current
+    /// context name (the term, since context names are MAIN-level).
+    fn context_switch(&self, form: &Value) -> Option<String> {
+        let items = match form {
+            Value::List(items) if items.len() == 2 => items,
+            _ => return None,
+        };
+        match &items[0] {
+            Value::Symbol(id) if self.interner.name(*id) == "context" => {}
+            _ => return None,
+        }
+        let name_sym = match &items[1] {
+            Value::Symbol(id) => *id,
+            // (context 'X) -> (quote X)
+            Value::List(q)
+                if q.len() == 2
+                    && matches!(&q[0], Value::Symbol(s) if self.interner.name(*s) == "quote") =>
+            {
+                match &q[1] {
+                    Value::Symbol(id) => *id,
+                    _ => return None,
+                }
+            }
+            _ => return None,
+        };
+        let name = self.interner.name(name_sym);
+        Some(name.rsplit(':').next().unwrap_or(name).to_string())
     }
 
     fn peek(&self) -> Option<u8> {
@@ -89,16 +136,33 @@ impl<'a> Reader<'a> {
 
     fn read_list(&mut self) -> Result<Value, String> {
         self.pos += 1; // consume '('
+        let saved_suppress = self.suppress_qualify;
         let mut items = Vec::new();
         loop {
             self.skip_ws_and_comments();
             match self.peek() {
-                None => return Err("unterminated list: missing ')'".to_string()),
+                None => {
+                    self.suppress_qualify = saved_suppress;
+                    return Err("unterminated list: missing ')'".to_string());
+                }
                 Some(b')') => {
                     self.pos += 1;
+                    self.suppress_qualify = saved_suppress;
                     return Ok(Value::list(items));
                 }
-                Some(_) => items.push(self.read_form()?),
+                Some(_) => {
+                    let item = self.read_form()?;
+                    // A `(context …)` form's arguments name a MAIN-level context,
+                    // so read them unqualified (ADR-0026).
+                    if items.is_empty() {
+                        if let Value::Symbol(id) = &item {
+                            if self.interner.name(*id) == "context" {
+                                self.suppress_qualify = true;
+                            }
+                        }
+                    }
+                    items.push(item);
+                }
             }
         }
     }
@@ -207,10 +271,23 @@ impl<'a> Reader<'a> {
         match parse_number(text) {
             NumParse::Num(v) => Ok(v),
             NumParse::Bigint(digits) => classify_bigint(&digits, text),
-            NumParse::No => {
-                let id: SymId = self.interner.intern(text);
-                Ok(Value::Symbol(id))
-            }
+            NumParse::No => Ok(Value::Symbol(self.intern_symbol(text))),
+        }
+    }
+
+    /// Intern a symbol name, qualifying it with the current context (ADR-0026)
+    /// unless we are in `MAIN`, reading a context name, the token is already
+    /// context-qualified, or it names a MAIN primitive.
+    fn intern_symbol(&mut self, text: &str) -> SymId {
+        if self.current_ctx != "MAIN"
+            && !self.suppress_qualify
+            && !text.contains(':')
+            && !self.primitives.contains(text)
+        {
+            let qualified = format!("{}:{}", self.current_ctx, text);
+            self.interner.intern(&qualified)
+        } else {
+            self.interner.intern(text)
         }
     }
 }
