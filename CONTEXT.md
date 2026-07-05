@@ -92,6 +92,10 @@ _Avoid_: "bignum", "long" (newLISP's `L` is lexical only), "arbitrary integer"
 A fixed-length, list-like value (ADR-0023). It indexes, `setf`-assigns its elements, reports `length`, and prints exactly like a `list`; the only observable differences are the predicates (`array?` is true, `list?` is nil) and that it cannot be resized — `push`/`pop`/`extend` on an array are errors. `array-list` converts it to a plain list. Like a list it is an ORO value, deep-copied on store and pass.
 _Avoid_: "vector", "tuple", "fixed list"
 
+**regular expression**:
+A pattern for `regex`/`regex-comp`. newLISP uses PCRE; niiLISP uses the pure-Rust `regex` crate (RE2-style), so classes, quantifiers, groups, alternation, and anchors work, but **backreferences and lookaround do not** (ADR-0028). Matching is over the byte string and returns byte offsets. Behind a default-on `regex` build feature.
+_Avoid_: "PCRE" (niiLISP's regex is not PCRE), "pattern" (bare — ambiguous with `struct`/`pack` layouts)
+
 **ORO (One Reference Only)**:
 newLISP's GC-free memory model, which niiLISP commits to reproducing: every value has exactly one owner, values are deep-copied when stored in a structure or passed to a function, and memory is freed stack-wise as evaluation unwinds. Cyclic references cannot arise by construction.
 _Avoid_: "garbage collection", "refcounting", "ownership model"

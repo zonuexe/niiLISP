@@ -33,22 +33,43 @@ what is deliberately deferred, so work can resume without re-deriving context.
   `min`/`max`/`even?`/`odd?`/`flat`/`join`/`member`/`unique`/`true?`, and the
   `dostring`/`until`/`extend`/`swap` special forms.
 
-## Next task — pick up here: cut the next release, then choose a slice
+## Next task — pick up here: regex + Unicode case folding (ADR-0028)
 
-The lambda-calculus gist milestone is **done** (ADR-0027) — a good point to cut a
-release. Use the `niilisp-release-prep` skill: bump the crate version, seal the
-`[Unreleased]` changelog, reconcile the README, verify, tag. **Before tagging, do
-the release-pipeline TODO below** (the `ffi` default feature vs the cross-compile
-matrix). After the release, candidates for the next slice, roughly by value:
+**Design is done and grilled ([ADR-0028](adr/0028-regex-and-unicode-case.md));
+implement it.** Add `regex`/`regex-comp` (the pure-Rust `regex` crate, RE2-style,
+behind a default-on `regex` feature) and make `upper-case`/`lower-case`
+Unicode-aware. Targets: `qa-utf8-char-regex`, `qa-utf8-special`, `qa-utf8-compile`.
 
-- **UTF-8 follow-ups** (the other half of the string arc): Unicode case folding
-  for `upper-case`/`lower-case` (currently ASCII), char-based `trim`, and
-  `regex` over UTF-8 (the `qa-utf8-*regex*` oracles). Regex is a big sub-feature
-  and wants its own grilled ADR; the case/trim upgrades are a smaller library
-  pass.
+Build order:
+
+1. **Cargo** — a `regex` feature (default-on) with an optional `regex` dependency,
+   mirroring the `bigint` feature.
+2. **A compiled-regex cache** on `Interp` (`RefCell<HashMap<(String, i64),
+   regex::bytes::Regex>>`) built once per `(pattern, option)`. Map PCRE option
+   bits to `RegexBuilder`: `1`→case-insensitive, `0x2`→multi-line, `0x4`→dotall,
+   `0x800`→no-op (Unicode default); ignore the rest.
+3. **`regex`** builtin (`#[cfg(feature = "regex")]`) — `(regex pat text [opt
+   [off]])` over `regex::bytes`; first match → `(match byte-off byte-len [subN
+   offN lenN…])` or `nil`.
+4. **`regex-comp`** builtin — compile+cache, return the pattern string on success,
+   error on a malformed pattern.
+5. **Unicode case** — `upper-case`/`lower-case` decode via the ADR-0025 char layer
+   and map each char with Rust's `to_uppercase`/`to_lowercase`; invalid bytes pass
+   through. ASCII unchanged.
+6. **Tests** — hermetic regex/case unit tests + wire the three `qa-utf8-*` oracles
+   into `tests/qa.rs` (gated on `feature = "regex"`).
+
+**Deferred (ADR-0028):** `$0`/`$1` match variables; regex option on `replace`/
+`find`; PCRE backreferences/lookaround. `qa-utf8-ext` (needs `bits`, no regex) is
+a separate slice.
+
+Then, other candidates:
+
 - **Dictionary API + persistence** — `(Dict key)` / `(Dict assoc)` / `(Dict)`
   over contexts, plus `save`/`load`/`delete`/`sys-info`/`randomize`/file I/O.
   Unlocks `qa-dictionary`. Its own grilled ADR (file I/O is the big piece).
+- **`bits` + `qa-utf8-ext`** — a small builtin (`bits` = integer to binary
+  string) and whatever else that oracle needs; no regex.
 - **qa-ref tail** — string-byte places (`(setf (s 3) "D")`), `eval`/loop
   place-returns. Touches the place model; scope first.
 
