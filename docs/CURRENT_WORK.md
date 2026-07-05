@@ -24,14 +24,21 @@ what is deliberately deferred, so work can resume without re-deriving context.
   promoted to full special forms; a language spec under [`docs/spec/`](spec/)
   (syntax, types, special-forms, functions).
 - Since v0.2.0 (unreleased, on `master`): **regex** and **Unicode case folding**
-  (ADR-0028) — `regex`/`regex-comp` (pure-Rust `regex` crate, RE2-style, default-on
-  `regex` feature) and Unicode `upper-case`/`lower-case`; **character-based
-  `dostring`** (ADR-0025) — the loop var binds each UTF-8 character's code point,
-  not each byte.
-- Tests: 62 unit + 13 integration (`qa-exception`, `qa-foop`, `qa-nullstring`,
-  `qa-bigint`, `qa-longnum`, `qa-utf8`, `qa-utf8-char-regex`, `qa-utf8-special`,
-  `qa-utf8-compile`, `qa-utf8-ext`, `qa-factorfibo` [`#[ignore]`d — slow sieve],
-  and two hermetic `ffi` tests); the suite passes under both default features and
+  (ADR-0028); **character-based `dostring`** (ADR-0025); **file I/O**
+  ([ADR-0029](adr/0029-file-io-slice.md)) — handles (`open`/`close`/`seek`/
+  `read-buffer`/`write-buffer`/`read-line`), whole-file (`read-file`/`write-file`/
+  `append-file`), filesystem (`directory`/`real-path`/`make-dir`/`remove-dir`/
+  `change-dir`/`rename-file`/`delete-file`/`file-info`/`file?`/`directory?`/`env`),
+  and persistence (`save`/`load`/`source`), all always-on (pure `std::fs`); and
+  **dictionaries** ([ADR-0030](adr/0030-dictionary-context-as-hash.md)) — a
+  nil-default-functor context as a hash (`(Ctx key [val])`/`(Ctx assoc)`/`(Ctx)`),
+  with `new` copying prototypes and the predefined `Class` marker keeping FOOP
+  construction distinct, plus `delete`/`sys-info`/`randomize`.
+- Tests: 65 unit + 16 integration (`qa-exception`, `qa-foop`, `qa-dictionary`,
+  `qa-nullstring`, `qa-bigint`, `qa-longnum`, `qa-utf8`, `qa-utf8-char-regex`,
+  `qa-utf8-special`, `qa-utf8-compile`, `qa-utf8-ext`, `qa-factorfibo`
+  [`#[ignore]`d — slow sieve], three hermetic `fileio` tests, and two hermetic
+  `ffi` tests); the suite passes under both default features and
   `--no-default-features`.
 - Standard-library fill-ins (byte-based, no UTF-8 dependency): string builtins
   `upper-case`/`lower-case`/`trim`/`slice`/`find`/`explode`/`chop`, the RNG
@@ -39,39 +46,35 @@ what is deliberately deferred, so work can resume without re-deriving context.
   `min`/`max`/`even?`/`odd?`/`flat`/`join`/`member`/`unique`/`true?`, and the
   `dostring`/`until`/`extend`/`swap` special forms.
 
-## Next task — pick up here: implement the grilled File I/O + Dictionary slices
+## Next task — pick up here: choose the next slice
 
 A gap analysis vs newLISP ([`notes/20260706_newlisp-gap-analysis.md`](notes/20260706_newlisp-gap-analysis.md))
 found ~221 of 378 primitives missing, clustered into whole unbuilt subsystems
-(file I/O, processes, networking, XML/JSON, dates). **North star decided (grilled):
-order by dependency, not by the GUI** — the *Graphical interface* chapter stays a
+(file I/O, processes, networking, XML/JSON, dates). **North star (grilled): order
+by dependency, not by the GUI** — the *Graphical interface* chapter stays a
 long-horizon target we do **not** schedule (newLISP-GS needs process + net + a
 Java `guiserver.jar`; its `eval-string`-driven socket substrate is three unbuilt
 subsystems). Near term we build the shared foundation the GUI *also* needs.
 
-Two slices are **fully grilled with ADRs and ready to implement**, in order:
+The three grilled foundation slices are **done** (ADR-0029/0030): file I/O
+(handles + filesystem + `save`/`load`/`source`) and dictionaries; `qa-dictionary`
+passes and is wired. Candidates, roughly by value:
 
-1. **File I/O — slice 1** ([ADR-0029](adr/0029-file-io-slice.md)): raw I/O +
-   filesystem ops (`open`/`close`/`read-buffer`/`write-buffer`/`read-line`/
-   `read-file`/`write-file`/`append-file`/`seek` + `directory`/`real-path`/
-   `make-dir`/`remove-dir`/`change-dir`/`rename-file`/`delete-file`/`file-info` +
-   `file?`/`directory?`/`exists`/`env`). Opaque integer handles from an interp
-   registry (0/1/2 reserved), nil-on-failure, always-on (no feature), byte-buffer
-   paths → OS-native. Acceptance: **`qa-lfs`**. (`qa-utf16path` = Windows/deferred;
-   `qa-local-domain` = networking, not file I/O.)
-2. **Dictionary core** ([ADR-0030](adr/0030-dictionary-context-as-hash.md)):
-   predefine `Class:Class`, rewrite context-apply so a **nil** default functor →
-   hash access (get/set/bulk/enumerate/delete), keys as `_`-prefixed context
-   symbols (`makeSafeSymbol`), `(context)` 0-arg, plus `sys-info`/`randomize`.
-   Removes the implicit-construction fallback. Verified by a unit test of the
-   `qa-dictionary` logic.
-3. **File I/O — slice 2 (persistence)**: `save`/`load`/`source` — a deterministic,
-   sorted, round-trippable source serialisation **driven by the dictionary's real
-   data**. Wire **`qa-dictionary`** once this lands.
+- **Processes** (`process`/`exec`/`pipe`/`fork`/`spawn`/`sync`/`share`) — the next
+  GUI-enabling subsystem; needs a grilled ADR (portability, the ORO value-passing
+  story for `share`/`spawn`). Unlocks `qa-share`/`qa-pipe`/`qa-cilk` etc.
+- **Networking** (`net-connect`/`net-listen`/`net-accept`/`net-send`/`net-receive`/
+  `net-select`, then UDP/HTTP/`net-eval`) — the other GUI enabler; grilled ADR.
+  Unlocks `qa-net`/`qa-udp`/`qa-local-domain`.
+- **qa-ref tail** — string-byte places (`(setf (s 3) "D")`), `eval`/loop
+  place-returns. Touches the place model; scope first.
+- **Independent leaves** (schedule when a target needs them): XML/JSON
+  (`xml-parse`/`json-parse`), dates (`date`/`now`/`date-value`), `parse`, rounding
+  (`ceil`/`floor`/`round`/`sgn`), `bits`, matrix/stats math.
 
-Lower-priority independent leaves (schedule when a target needs them): **qa-ref
-tail** (string-byte places, `eval`/loop place-returns — touches the place model),
-**`bits`** (small; no wired oracle needs it), XML/JSON, dates, matrix/stats math.
+**Windows note:** `qa-utf16path` needs faithful UTF-16 path handling (file I/O
+currently does lossy UTF-8 on Windows, binary-safe on Unix — ADR-0029). A future
+Windows-paths slice would unlock it.
 
 The evaluator dispatch optimisation ([ADR-0017](adr/0017-evaluator-dispatch-and-call-path.md))
 stays intentionally **deferred** (premature optimisation).
@@ -86,6 +89,26 @@ newLISP's; fine for `qa-bigint` (invariant-based) but revisit if a future script
 depends on the exact distribution.
 
 ## Done since v0.1.0
+
+**File I/O + Dictionaries** ([ADR-0029](adr/0029-file-io-slice.md),
+[ADR-0030](adr/0030-dictionary-context-as-hash.md), grilled before writing): the
+first two foundation slices from the gap analysis. File I/O (`src/fileio.rs`,
+always-on pure `std::fs`): opaque integer handles from an interp registry (0/1/2
+reserved, freelist reuse), `open`/`close`/`seek`/`read-buffer` (a place-taking
+special form)/`write-buffer`/`read-line`/`current-line`, whole-file
+`read-file`/`write-file`/`append-file`, filesystem
+`directory`/`real-path`/`make-dir`/`remove-dir`/`change-dir`/`rename-file`/
+`delete-file`/`file?`/`directory?`/`file-info`/`env`, and persistence
+`save`/`load`/`source`. Operational failure → nil; byte-buffer paths → OS-native
+(binary-safe on Unix; Windows UTF-16 deferred). Dictionaries: context application
+dispatches on the default functor `Ctx:Ctx` — lambda → FOOP constructor, nil →
+hash (`(Ctx key [val])` get/set/delete, `(Ctx assoc)` bulk-load, `(Ctx)`
+enumerate sorted), other non-nil → tagged object list; keys are `_`-prefixed
+context symbols. `new` copies prototypes and the predefined `Class` marker gives
+FOOP classes a non-nil functor, keeping construction distinct from hash access.
+Added `delete`/`sys-info`/`randomize`. `qa-dictionary` passes (bulk-load →
+verify → save → delete → load → byte-identical) and is wired. `qa-lfs` is
+interactive + 5 GB so a hermetic `tests/fileio.rs` covers its logic instead.
 
 **Character-based `dostring`** (extends [ADR-0025](adr/0025-utf8-character-operations.md),
 since v0.2.0): `dostring` now binds its loop variable to each UTF-8 character's
