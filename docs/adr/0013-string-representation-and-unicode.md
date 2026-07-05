@@ -17,6 +17,7 @@ newLISP ships separate ASCII and UTF-8 builds. niiLISP ships **one** build with 
 
 - v1: the `Vec<u8>` representation and byte-oriented behaviour (`length`, byte indexing, construction from escapes).
 - v2 slice: the precise character-oriented function set (`utf8len`, char indexing/slicing, `char`/`unicode`, regex over UTF-8), pinned to `qa-utf8`, `qa-utf8-char-regex`, `qa-utf8-compile`, `qa-utf8-ext`, `qa-utf8-special` as oracles.
+  - **The core character function set is specified and implemented in [ADR-0025](0025-utf8-character-operations.md)** (`utf8len`; `nth`/indexing/`first`/`rest`/`last`/`explode` on character boundaries; slice/length stay byte-based). Unicode case folding and regex-over-UTF-8 remain deferred; the `qa-utf8*` oracles also depend on `context`/`dotree` and `regex`, tracked separately.
 
 ## Consequences
 

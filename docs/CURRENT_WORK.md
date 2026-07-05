@@ -27,21 +27,45 @@ what is deliberately deferred, so work can resume without re-deriving context.
   `min`/`max`/`even?`/`odd?`/`flat`/`join`/`member`/`unique`/`true?`, and the
   `dostring`/`until`/`extend`/`swap` special forms.
 
-## Next task — pick up here: choose the next slice
+## Next task — pick up here: UTF-8 character operations (ADR-0025)
 
-The FFI, bigint, array, and copy-on-write arcs are all complete. Candidates for
-the next slice:
+**Design is done and grilled ([ADR-0025](adr/0025-utf8-character-operations.md));
+implement it.** String storage stays byte-based (`Rc<Vec<u8>>`, binary-safe,
+ADR-0013) — this slice aligns the *character-vs-byte* semantics with newLISP and
+adds `utf8len`. No niiLISP-original functions.
 
-- **Evaluator dispatch & call path** ([ADR-0017](adr/0017-evaluator-dispatch-and-call-path.md))
-  — the biggest throughput lever for recursion-heavy code (`(tak 24 16 8)` still
-  ~0.82s); SymId-based special-form dispatch, a dense symbol table, then the
-  dispatch cache. A grilled ADR would firm up the staging.
-- **Contexts as namespaces/dictionaries** — beyond FOOP; unlocks `qa-dictionary`.
-  Wants its own grilled ADR.
-- **UTF-8 char ops** ([ADR-0013](adr/0013-string-representation-and-unicode.md))
-  — `utf8len`, char indexing/slicing; unlocks `qa-utf8*`. Its own grilled ADR.
-- **qa-ref tail** — context-as-hash, string-byte places (`(setf (s 3) "D")`),
-  `eval`/loop place-returns. Touches the place model; scope first.
+Build order:
+
+1. **Decode layer** — a small set of Rust helpers over `&[u8]` (character count;
+   byte range of the n-th character, negative from the end; a character-boundary
+   iterator). **Lenient decoding**: character length from the lead byte
+   (`0/110/1110/11110…`), clamped to available bytes; an invalid/truncated lead
+   is a one-byte character. Never `str::chars()` (storage may be invalid UTF-8).
+   Put every char boundary computation here so a future `Rc`-attached offset
+   index can slot in without touching callers.
+2. **`utf8len`** builtin — character (code point) count. (`length` stays bytes.)
+3. **Switch to character boundaries on strings:** `nth`, `(str i)` indexing
+   (`index_one`'s `Str` arm), `first`, `rest`, `last`, and `explode`. For ASCII
+   these are unchanged, so existing tests (e.g. `qa-longnum`'s `explode`) stay
+   green.
+4. **Leave byte-based:** `slice`, the implicit slice/rest `(i str)` / `(i len
+   str)`, `length`, `find`/`starts-with`/`ends-with`. `explode` does **not** stop
+   at a NUL byte (binary-safe deviation, per the ADR).
+5. **Tests** — hermetic char-semantics tests (multi-byte `utf8len`/`nth`/
+   indexing/`first`/`rest`/`last`/`explode`; byte-based `slice`/`length`
+   unchanged; ASCII regression). Use `\ddd` byte escapes to build multi-byte
+   strings, as `qa-utf8` does.
+
+**Deferred (no current demand):** Unicode case folding for
+`upper-case`/`lower-case` (stay ASCII) and char-based `trim` — a later library
+pass. **Gated elsewhere:** a full `qa-utf8` pass also needs `context`/`dotree`/
+`term` (contexts-as-namespaces) and the `qa-utf8-*regex*` oracles need `regex` —
+separate slices; do not wire `qa-utf8*` here.
+
+Other candidates after this: **evaluator dispatch**
+([ADR-0017](adr/0017-evaluator-dispatch-and-call-path.md), `(tak 24 16 8)` ~0.82s);
+**contexts as namespaces/dictionaries** (unlocks `qa-dictionary`, and much of
+`qa-utf8`); **qa-ref tail** (string-byte places, `eval`/loop place-returns).
 
 Note the RNG distribution for `(random offset scale)` is **uniform**, not
 newLISP's; fine for `qa-bigint` (invariant-based) but revisit if a future script
