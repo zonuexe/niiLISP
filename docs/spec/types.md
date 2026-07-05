@@ -91,7 +91,11 @@ value and also the substrate for FOOP objects (a list whose head is a class
 context's symbol).
 
 - Literal (as data): `'(a b c)`; built with `(list …)` / `(cons …)`.
-- **No dotted pairs**: `(cons 1 2)` yields `(1 2)`, not `(1 . 2)`.
+- **No dotted pairs.** `(cons x lst)` prepends `x` to the list `lst`; if the
+  second argument is not a list, `(cons a b)` yields the two-element list
+  `(a b)` — so `(cons 1 2)` is `(1 2)`, never `(1 . 2)`. There are no `car`/`cdr`
+  cells (see [`compatibility.md`](compatibility.md)). This is the canonical home
+  for list construction semantics; `functions.md` gives the bare signatures.
 - Indexing is implicit when a list or integer is in operator position
   (`syntax.md` §5); negative indices count from the end.
 - Mutated through place forms (`push`, `pop`, `setf`, `sort`, … — see

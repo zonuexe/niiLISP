@@ -386,8 +386,8 @@ list see [`functions.md`](functions.md).
 
 ## 12. Non-goals and deviations from traditional Lisp
 
-Recorded so the surprises are explicit (see also the design notes under
-[`docs/`](../)):
+A summary; the full catalogue with a cross-dialect comparison is in
+[`compatibility.md`](compatibility.md).
 
 - **No cons cells / dotted pairs**, and lists are values (ORO), so there is **no
   `eq` identity** — only structural `=`.

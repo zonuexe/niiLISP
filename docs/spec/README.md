@@ -18,6 +18,12 @@ Start with [Syntax](syntax.md) for the whole picture, then dip into [Types](type
 The remaining chapters below deepen sections that `syntax.md` currently
 summarises.
 
+**Where a topic lives.** A built-in's *contract* (signature, return) goes in
+[functions.md](functions.md); the *semantics of the data model* it operates on
+(e.g. why `cons` makes no dotted pairs) goes with the type in [types.md](types.md);
+the *rationale* is in the [ADRs](../adr/); and a departure from traditional Lisp
+is catalogued in [compatibility.md](compatibility.md).
+
 ## Part I — The language
 
 | Chapter | Status | Contents |
@@ -42,7 +48,7 @@ summarises.
 
 | Chapter | Status | Contents |
 | --- | --- | --- |
-| Compatibility & deviations | _(planned)_ | Relationship to newLISP and to traditional Lisp: no cons/dotted pairs, no `eq` identity, dynamic scope, fexprs instead of hygienic macros, no TCO. Currently in `syntax.md` §12; see also the peculiarities note under `docs/notes/`. |
+| [Compatibility & deviations](compatibility.md) | written | Relationship to newLISP and to traditional Lisp: no cons/dotted pairs, no `eq` identity, dynamic scope, fexprs instead of hygienic macros, no TCO, and a comparison table. The deeper *semantics* of each departure lives with its type or form; this chapter is the catalogue. |
 | Numeric model | _(planned)_ | Integer wrapping, the int64 + double tower, and the `L` bigint literal _(planned feature)_. Currently in `syntax.md` §1.2 / `types.md`. |
 
 ## Related documents

@@ -65,8 +65,10 @@ in [`special-forms.md`](special-forms.md); the language overview is in
 | `(append lst…)` | concatenate lists (or strings) into a copy |
 | `(sequence from to [step])` | list of numbers, inclusive |
 
-Destructive list operators (`push`, `pop`, `reverse`, `sort`, `rotate`,
-`replace`, `set-ref`) are **special forms** — see `special-forms.md`.
+List construction semantics (array-backed values, no dotted pairs) are in
+[`types.md`](types.md). Destructive list operators (`push`, `pop`, `reverse`,
+`sort`, `rotate`, `replace`, `set-ref`) are **special forms** — see
+[`special-forms.md`](special-forms.md).
 
 ## Higher-order
 
