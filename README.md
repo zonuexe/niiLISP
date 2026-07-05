@@ -8,7 +8,7 @@ This project is not affiliated with newLISP or Nuevatec. "newLISP" and "Nuevatec
 
 ## Status
 
-Early but usable for small scripts. niiLISP has a reader (three string syntaxes, numbers, quote, comments), a tree-walking evaluator with dynamic scoping and contexts, ORO-style value semantics, FOOP objects with reference `self`, `catch`/`throw`, newLISP's reference/place model for destructive operations, a growing set of builtins (integer, float, and arbitrary-precision **bigint** arithmetic, comparisons, lists, higher-order functions, strings, `format`, bitwise), and `import`/FFI for calling C functions with the struct/`pack` memory API and `callback`s (Unix). It passes the vendored `qa-exception`, `qa-foop`, `qa-nullstring`, `qa-bigint`, and `qa-longnum` suites. Not yet implemented: networking and full UTF-8 character operations. The language niiLISP accepts is described in the specification under [`docs/spec/`](docs/spec/) (start at [`syntax.md`](docs/spec/syntax.md)); design decisions live under [`docs/adr/`](docs/adr/).
+Usable for small scripts. niiLISP has a reader (three string syntaxes, numbers, quote, comments), a tree-walking evaluator with dynamic scoping and **contexts as switchable namespaces** (`context`/`dotree`/`term`), ORO value semantics with **copy-on-write** sharing, FOOP objects with reference `self`, `catch`/`throw`, and newLISP's reference/place model for destructive operations. Values include integers, IEEE-754 floats, arbitrary-precision **bigints**, binary-safe strings with **UTF-8 character operations**, lists, and fixed-length **arrays**. Lambdas are **list data** (build functions with `append`/`expand`/`args`), matching newLISP's code-as-data idiom. It has a large builtin set (arithmetic, comparisons, lists/arrays, higher-order, strings, `format`, bitwise, a seedable RNG) and `import`/**FFI** for calling C functions with the struct/`pack` memory API and `callback`s (Unix). It passes the vendored `qa-exception`, `qa-foop`, `qa-nullstring`, `qa-bigint`, `qa-longnum`, and `qa-utf8` suites. Not yet implemented: networking, regular expressions, Unicode case folding, and Windows FFI. The language niiLISP accepts is described in the specification under [`docs/spec/`](docs/spec/) (start at [`syntax.md`](docs/spec/syntax.md)); design decisions live under [`docs/adr/`](docs/adr/).
 
 ## Build
 
@@ -35,6 +35,7 @@ niilisp -e '(println (+ 1 2))'  # evaluate an expression
 echo '(println 42)' | niilisp - # read a script from stdin
 niilisp                         # start an interactive REPL
 niilisp --help                  # print usage
+niilisp --version               # print version
 ```
 
 ## Examples

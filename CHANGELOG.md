@@ -6,6 +6,8 @@ All notable changes to niiLISP are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-06
+
 ### Added
 
 - **Lambdas as list data** (ADR-0027): a lambda now presents newLISP's list interface — `(lambda …)`/`(fn …)`/`(lambda-macro …)` build and print as `(lambda (params…) body…)`, an empty `(lambda)` is the list `(lambda)`, `append` builds a lambda as data, and a list headed by `lambda`/`fn`/`lambda-macro` is callable. Adds `expand` (`(expand expr sym…)` substitutes named symbols' values; `(expand expr)` auto-substitutes upper-case symbols bound to code-like values) and `args` (the current function's arguments not bound to a parameter). A special form can also be aliased as a value (`(define DEFINE define)`). This runs newLISP's code-as-data lambda idiom, e.g. the [lambda-calculus gist](https://gist.github.com/kosh04/262332).
@@ -66,5 +68,6 @@ Initial release: a usable command-line interpreter for small newLISP scripts.
 `import`/FFI, networking, bigint, arrays, full UTF-8 character operations, and
 the remaining newLISP standard library.
 
-[Unreleased]: https://github.com/zonuexe/niiLISP/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/zonuexe/niiLISP/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/zonuexe/niiLISP/releases/tag/v0.2.0
 [0.1.0]: https://github.com/zonuexe/niiLISP/releases/tag/v0.1.0
