@@ -251,7 +251,7 @@ fexpr, not a hygienic macro); it decides what to evaluate:
 (until cond body)                     ; inverse of while
 (for (var from to [step]) body)      ; inclusive; direction auto by from/to
 (dolist (var list [break]) body)
-(dostring (var str [break]) body)   ; var := each byte value (0–255)
+(dostring (var str [break]) body)   ; var := each char's code point (ASCII: its byte)
 (dotimes (var count) body)
 ```
 

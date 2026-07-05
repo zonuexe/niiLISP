@@ -1071,9 +1071,9 @@ impl Interp {
     }
 
     fn sf_dostring(&self, args: &[Value]) -> Result<Value, Signal> {
-        // (dostring (var str [break-cond]) body...) — var := each byte value.
-        // Characters are bytes in the current model (ADR-0013); the loop var
-        // holds the integer value of each byte, as newLISP binds the char number.
+        // (dostring (var str [break-cond]) body...) — var := each character's
+        // Unicode code point. Iteration is character-based (ADR-0025), matching
+        // newLISP's UTF-8 build; for an ASCII string a code point is its byte.
         let spec = match args.first() {
             Some(Value::List(s)) if s.len() >= 2 => s,
             _ => return Err(Signal::error("dostring: expected (var string)")),
@@ -1097,8 +1097,8 @@ impl Interp {
         let mut scope = Scope::new(self);
         scope.bind(var, Value::Nil);
         let mut result = Value::Nil;
-        for &byte in bytes.iter() {
-            self.set_global(var, Value::Int(i64::from(byte)));
+        for cp in crate::utf8::codepoints(&bytes) {
+            self.set_global(var, Value::Int(i64::from(cp)));
             if let Some(cond) = break_cond {
                 if self.eval(cond)?.is_truthy() {
                     break;
@@ -2871,18 +2871,28 @@ mod tests {
     }
 
     #[test]
-    fn dostring_iterates_byte_values() {
-        // Sum of the byte values of "ABC" = 65 + 66 + 67.
+    fn dostring_iterates_code_points() {
+        // For ASCII a code point is its byte: sum of "ABC" = 65 + 66 + 67.
         assert_eq!(
             as_int(run("(set 'a 0) (dostring (c \"ABC\") (set 'a (+ a c))) a")),
             198
         );
-        // The break condition stops before running the body for that byte.
+        // The break condition stops before running the body for that character.
         assert_eq!(
             as_int(run(
                 "(set 'n 0) (dostring (c \"hello\" (= c 108)) (set 'n (+ n 1))) n"
             )),
             2
+        );
+        // A multi-byte string iterates whole characters, binding each code
+        // point — "我能" is two characters (25105, 33021), not six bytes.
+        assert_eq!(
+            as_int(run("(set 'n 0) (dostring (c \"我能\") (set 'n (+ n 1))) n")),
+            2
+        );
+        assert_eq!(
+            as_int(run("(set 'a 0) (dostring (c \"我能\") (set 'a (+ a c))) a")),
+            58126
         );
     }
 }

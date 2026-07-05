@@ -167,6 +167,41 @@ fn qa_utf8_compile_passes() {
     );
 }
 
+/// Character-based `dostring` (ADR-0025): the loop variable binds each UTF-8
+/// character's code point, not each byte, so a multi-byte string round-trips
+/// through `(char c)` and reports its character length via `utf8len`. The script
+/// also exercises `unpack`, so it needs the FFI memory API (ADR-0021); the
+/// `dostring` behaviour itself is covered feature-independently by a unit test.
+#[cfg(feature = "ffi")]
+#[test]
+fn qa_utf8_ext_passes() {
+    let stdout = run_qa("qa-utf8-ext");
+    // dostring reconstructs the original string from per-character code points.
+    assert!(
+        stdout.contains("dostring: 我能吞下玻璃而不伤身体。"),
+        "qa-utf8-ext dostring did not iterate characters:\n{}",
+        stdout
+    );
+    // The `unicode:` line prints code points, not raw bytes.
+    assert!(
+        stdout.contains("unicode: 25105 33021 21534"),
+        "qa-utf8-ext did not bind code points:\n{}",
+        stdout
+    );
+    // Byte length 36, character length 12 (utf8len is present).
+    assert!(
+        stdout.contains("length raw, utf8: 36, 12"),
+        "qa-utf8-ext length/utf8len wrong:\n{}",
+        stdout
+    );
+    // explode yields whole characters.
+    assert!(
+        stdout.contains("(\"我\" \"能\" \"吞\" \"下\""),
+        "qa-utf8-ext explode did not keep characters whole:\n{}",
+        stdout
+    );
+}
+
 #[test]
 fn qa_foop_passes() {
     let stdout = run_qa("qa-foop");

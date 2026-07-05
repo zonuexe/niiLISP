@@ -13,6 +13,7 @@ All notable changes to niiLISP are documented here. The format is based on
 ### Changed
 
 - `upper-case`/`lower-case` now perform **Unicode** case folding (ADR-0028), not just ASCII: each valid UTF-8 character is mapped with Unicode default case rules (so Cyrillic, Greek, etc. fold, and `ß` → `SS`), while invalid bytes pass through. ASCII behaviour is unchanged.
+- `dostring` now binds its loop variable to each **UTF-8 character's code point** rather than each byte (ADR-0025), matching newLISP's UTF-8 build — so `(dostring (c "我") (char c))` round-trips the character. For an ASCII string a code point equals its byte value, so existing behaviour is unchanged. Unlocks the vendored `qa-utf8-ext` suite.
 
 ## [0.2.0] - 2026-07-06
 

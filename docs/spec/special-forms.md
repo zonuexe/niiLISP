@@ -273,9 +273,10 @@ evaluates truthy for the current element, the loop stops before running `body`.
 (dostring (var str [break]) body)
 ```
 
-Binds `var` to each byte of `str` as an integer (0–255) — characters are bytes
-in the current model (ADR-0013). Like `dolist`, a truthy `break` expression
-stops the loop before running `body` for that byte.
+Binds `var` to each UTF-8 character of `str` as its Unicode code point, matching
+newLISP's UTF-8 build (ADR-0025); for an ASCII string a code point is its byte
+value (0–255). Like `dolist`, a truthy `break` expression stops the loop before
+running `body` for that character.
 
 ### `until` — loop while false
 

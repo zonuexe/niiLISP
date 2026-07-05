@@ -25,11 +25,13 @@ what is deliberately deferred, so work can resume without re-deriving context.
   (syntax, types, special-forms, functions).
 - Since v0.2.0 (unreleased, on `master`): **regex** and **Unicode case folding**
   (ADR-0028) — `regex`/`regex-comp` (pure-Rust `regex` crate, RE2-style, default-on
-  `regex` feature) and Unicode `upper-case`/`lower-case`.
-- Tests: 62 unit + 12 integration (`qa-exception`, `qa-foop`, `qa-nullstring`,
+  `regex` feature) and Unicode `upper-case`/`lower-case`; **character-based
+  `dostring`** (ADR-0025) — the loop var binds each UTF-8 character's code point,
+  not each byte.
+- Tests: 62 unit + 13 integration (`qa-exception`, `qa-foop`, `qa-nullstring`,
   `qa-bigint`, `qa-longnum`, `qa-utf8`, `qa-utf8-char-regex`, `qa-utf8-special`,
-  `qa-utf8-compile`, `qa-factorfibo` [`#[ignore]`d — slow sieve], and two hermetic
-  `ffi` tests); the suite passes under both default features and
+  `qa-utf8-compile`, `qa-utf8-ext`, `qa-factorfibo` [`#[ignore]`d — slow sieve],
+  and two hermetic `ffi` tests); the suite passes under both default features and
   `--no-default-features`.
 - Standard-library fill-ins (byte-based, no UTF-8 dependency): string builtins
   `upper-case`/`lower-case`/`trim`/`slice`/`find`/`explode`/`chop`, the RNG
@@ -39,16 +41,18 @@ what is deliberately deferred, so work can resume without re-deriving context.
 
 ## Next task — pick up here: choose the next slice
 
-The regex + Unicode-case slice is **done** (ADR-0028). Candidates, roughly by
+The regex + Unicode-case slice is **done** (ADR-0028); the character-based
+`dostring` slice is **done** (unlocked `qa-utf8-ext`). Candidates, roughly by
 value:
 
 - **Dictionary API + persistence** — `(Dict key)` / `(Dict assoc)` / `(Dict)`
   over contexts, plus `save`/`load`/`delete`/`sys-info`/`randomize`/file I/O.
   Unlocks `qa-dictionary`. Its own grilled ADR (file I/O is the big piece).
-- **`bits` + `qa-utf8-ext`** — a small builtin (`bits` = integer to binary
-  string) and whatever else that oracle needs; no regex.
 - **qa-ref tail** — string-byte places (`(setf (s 3) "D")`), `eval`/loop
   place-returns. Touches the place model; scope first.
+- **`bits`** — integer-to-binary-string builtin. Small; not needed by any wired
+  oracle (`qa-utf8-ext`'s `bits` lines are commented out), so low priority until
+  a target requires it.
 
 The evaluator dispatch optimisation ([ADR-0017](adr/0017-evaluator-dispatch-and-call-path.md))
 stays intentionally **deferred** (premature optimisation).
@@ -63,6 +67,16 @@ newLISP's; fine for `qa-bigint` (invariant-based) but revisit if a future script
 depends on the exact distribution.
 
 ## Done since v0.1.0
+
+**Character-based `dostring`** (extends [ADR-0025](adr/0025-utf8-character-operations.md),
+since v0.2.0): `dostring` now binds its loop variable to each UTF-8 character's
+Unicode code point instead of each byte, matching newLISP's UTF-8 build. A new
+`utf8::codepoints` lenient decoder feeds it (invalid/binary bytes fall back to the
+raw byte value); for ASCII a code point equals the byte, so `qa-bigint`/`qa-longnum`
+(digit-string `dostring` loops) are unaffected. `qa-utf8-ext` now passes and is
+wired in (gated on the `ffi` feature — it also uses `unpack`). `char`'s
+int→string path already produced the multi-byte character, and the oracle's
+`bits` lines are commented out, so no new builtin was needed.
 
 **Regex + Unicode case folding** ([ADR-0028](adr/0028-regex-and-unicode-case.md),
 since v0.2.0): `regex`/`regex-comp` on the pure-Rust `regex` crate (RE2-style, not

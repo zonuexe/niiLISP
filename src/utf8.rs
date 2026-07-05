@@ -46,6 +46,19 @@ pub fn char_count(bytes: &[u8]) -> usize {
     char_ranges(bytes).count()
 }
 
+/// Iterate the Unicode code point of each character in `bytes`. A well-formed
+/// multi-byte sequence yields its code point; an invalid or truncated sequence
+/// (decoded as one byte by `lead_len`) yields that raw byte value, so this never
+/// fails on the binary bytes a niiLISP string may hold (ADR-0013).
+pub fn codepoints(bytes: &[u8]) -> impl Iterator<Item = u32> + '_ {
+    char_ranges(bytes).map(move |(start, end)| {
+        std::str::from_utf8(&bytes[start..end])
+            .ok()
+            .and_then(|s| s.chars().next())
+            .map_or(u32::from(bytes[start]), u32::from)
+    })
+}
+
 /// The byte range of the `idx`-th character (a negative `idx` counts from the
 /// end), or `None` if out of range.
 pub fn char_byte_range(bytes: &[u8], idx: i64) -> Option<(usize, usize)> {
