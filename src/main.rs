@@ -13,6 +13,7 @@
 mod builtins;
 mod eval;
 mod ffi;
+mod fileio;
 mod printer;
 mod reader;
 mod utf8;

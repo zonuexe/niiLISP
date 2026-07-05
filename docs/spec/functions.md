@@ -162,6 +162,36 @@ The RNG is a seedable xorshift generator shared across `rand`/`random`/`amb`;
 `(random offset scale)` is **uniform** (newLISP's exact distribution is not
 reproduced). `amb` is a special form (see `special-forms.md`).
 
+## File I/O and filesystem (ADR-0029)
+
+Always compiled in. A **handle** is an opaque integer from an interpreter-side
+registry; `0`/`1`/`2` are stdin/stdout/stderr. Operational failures (a missing
+file, EOF, a bad handle) return `nil`; only type misuse raises an error. Paths
+are byte-buffer strings, binary-safe on Unix.
+
+| Function | Meaning |
+| --- | --- |
+| `(open path mode)` | open `path` (`mode` = `read`/`write`/`append`/`update`); a handle, or `nil` |
+| `(close handle)` | close a handle; `true`, or `nil` if not open |
+| `(seek handle [pos])` | with `pos`: seek (absolute; `-1` = end); without: the current position |
+| `(read-buffer handle place size [wait])` | read ≤ `size` bytes (or until `wait`) into `place` (a symbol); returns the byte count |
+| `(write-buffer handle str [size])` | write `str` (≤ `size` bytes); returns the byte count |
+| `(read-line [handle])` | a line (terminator stripped) from `handle` (default stdin), or `nil` at EOF |
+| `(current-line)` | the most recent `read-line` result |
+| `(read-file path)` | the whole file as a string, or `nil` |
+| `(write-file path str)` / `(append-file path str)` | write/append the whole string; returns the byte count, or `nil` |
+| `(directory [path [pattern]])` | entry names (incl. `.`/`..`); `pattern` filters under the `regex` feature |
+| `(real-path [path])` | the canonical absolute path, or `nil` |
+| `(make-dir path)` / `(remove-dir path)` | create / remove a directory; `true` or `nil` |
+| `(change-dir path)` | change the working directory; `true` or `nil` |
+| `(rename-file old new)` / `(delete-file path)` | rename / delete; `true` or `nil` |
+| `(file? path)` / `(directory? path)` | whether `path` exists / is a directory |
+| `(file-info path [i])` | a 10-int list `(size mode device inode links uid gid atime mtime ctime)` (0 where a platform lacks a field), or element `i` |
+| `(env name [value])` | get an environment variable (string/`nil`); with `value` set it (a `nil` value unsets), returning `true` |
+
+`read-buffer` is a special form (its `place` is unevaluated). `save`/`load`/
+`source` (dictionary persistence) are a later slice.
+
 ## FFI (Unix, `ffi` feature)
 
 | Function | Meaning |

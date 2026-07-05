@@ -82,6 +82,7 @@ pub const SPECIAL_FORMS: &[&str] = &[
     "define-macro",
     "catch",
     "throw",
+    "read-buffer",
 ];
 
 /// The interpreter state. Methods take `&self`; mutable state lives behind
@@ -112,6 +113,11 @@ pub struct Interp {
     /// compile a pattern once (ADR-0028).
     #[cfg(feature = "regex")]
     regex_cache: RefCell<HashMap<(String, i64), regex::bytes::Regex>>,
+    /// Open-file registry for the file-I/O handles (ADR-0029).
+    files: RefCell<crate::fileio::FileTable>,
+    /// The most recent `read-line` result, for `(current-line)` — a single
+    /// interpreter-global buffer, as in newLISP (ADR-0029).
+    current_line: RefCell<Vec<u8>>,
 }
 
 /// Pops the `args` stack when a call returns (including on error unwind),
@@ -227,10 +233,28 @@ impl Interp {
             args_stack: RefCell::new(Vec::new()),
             #[cfg(feature = "regex")]
             regex_cache: RefCell::new(HashMap::new()),
+            files: RefCell::new(crate::fileio::FileTable::new()),
+            current_line: RefCell::new(Vec::new()),
         };
         builtins::install(&interp);
         crate::ffi::install(&interp);
+        crate::fileio::install(&interp);
         interp
+    }
+
+    /// The open-file registry, for the file-I/O builtins (ADR-0029).
+    pub fn files(&self) -> &RefCell<crate::fileio::FileTable> {
+        &self.files
+    }
+
+    /// Record the line just read by `read-line`, for `(current-line)`.
+    pub fn set_current_line(&self, line: Vec<u8>) {
+        *self.current_line.borrow_mut() = line;
+    }
+
+    /// The most recent `read-line` result (`(current-line)`).
+    pub fn current_line(&self) -> Vec<u8> {
+        self.current_line.borrow().clone()
     }
 
     /// Record the process command line for `(main-args)`.
@@ -719,9 +743,53 @@ impl Interp {
             "define-macro" => self.sf_define_macro(args),
             "catch" => self.sf_catch(args),
             "throw" => self.sf_throw(args),
+            "read-buffer" => self.sf_read_buffer(args),
             _ => return None,
         };
         Some(r)
+    }
+
+    /// `(read-buffer handle place size [wait-str])` — reads up to `size` bytes
+    /// (or until `wait-str`) from `handle`, assigns the string into `place` (a
+    /// symbol or other place), and returns the byte count (ADR-0029). `place` is
+    /// unevaluated, which is why this is a special form.
+    fn sf_read_buffer(&self, args: &[Value]) -> Result<Value, Signal> {
+        let handle = self.eval(
+            args.first()
+                .ok_or_else(|| Signal::error("read-buffer: missing handle"))?,
+        )?;
+        let h = match handle {
+            Value::Int(n) => n,
+            Value::Float(f) => f as i64,
+            _ => return Err(Signal::error("read-buffer: handle must be an integer")),
+        };
+        let place = self.resolve_place(
+            args.get(1)
+                .ok_or_else(|| Signal::error("read-buffer: missing target place"))?,
+        )?;
+        let size = match args.get(2) {
+            Some(e) => match self.eval(e)? {
+                Value::Int(n) => n,
+                Value::Float(f) => f as i64,
+                _ => return Err(Signal::error("read-buffer: size must be an integer")),
+            },
+            None => return Err(Signal::error("read-buffer: missing size")),
+        };
+        let wait = match args.get(3) {
+            Some(e) => match self.eval(e)? {
+                Value::Str(b) => Some(b.to_vec()),
+                Value::Nil => None,
+                _ => return Err(Signal::error("read-buffer: wait must be a string")),
+            },
+            None => None,
+        };
+        let (bytes, n) = crate::fileio::read_buffer(self, h, size, wait)?;
+        let v = Value::str(bytes);
+        self.with_place_mut(&place, move |loc| {
+            *loc = v;
+            Ok(Value::Nil)
+        })?;
+        Ok(Value::Int(n as i64))
     }
 
     fn sf_if(&self, args: &[Value]) -> Result<Value, Signal> {
