@@ -28,6 +28,14 @@ _Avoid_: "hook", "handler", "function pointer" (bare)
 A niiLISP value that wraps a C function resolved through `import`: the resolved code pointer plus its declared argument and return types. It is callable like any other function, and `import` binds it under the C function's name.
 _Avoid_: "native function" (reserved for newLISP's cell-ABI extensions), "external function"
 
+**struct (FFI layout)**:
+A C struct layout for the FFI memory API: a named list of C type names (the same set as `import`) describing a record. `pack`/`unpack` use it to serialise values to and from the native C ABI byte layout (alignment and padding included).
+_Avoid_: "record", "format" (reserved for the deferred pack format-char language)
+
+**address (FFI)**:
+The `(address 'sym)` operation: the stable memory address of a symbol-held value's buffer, for handing to C. Valid only while the symbol is neither reassigned nor resized; taking the address of an arbitrary temporary value is unsafe under ORO and disallowed.
+_Avoid_: "pointer" (bare — an address is an integer)
+
 **Module (newLISP sense)**:
 A newLISP `.lsp` file that exposes functionality, usually by calling into an external shared library via `import`. The dominant real-world form of newLISP "module". Distinct from a native C extension that links against newLISP's own cell ABI.
 _Avoid_: "library", "package", "plugin"
