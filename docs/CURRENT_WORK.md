@@ -29,10 +29,40 @@ what is deliberately deferred, so work can resume without re-deriving context.
   `min`/`max`/`even?`/`odd?`/`flat`/`join`/`member`/`unique`/`true?`, and the
   `dostring`/`until`/`extend`/`swap` special forms.
 
-## Next task — pick up here: choose the next slice
+## Next task — pick up here: lambdas as lists + expand/args (ADR-0027)
 
-The FFI, bigint, array, copy-on-write, UTF-8 char-ops, and contexts-as-namespaces
-arcs are all complete. Candidates, roughly by value:
+**Release milestone: make the lambda-calculus gist
+(<https://gist.github.com/kosh04/262332>) run.** Design is done and grilled
+([ADR-0027](adr/0027-lambda-as-list-hybrid.md)); implement it. The gist's core is
+`(define-macro (LAMBDA) (append (lambda) (expand (args))))` — it builds lambdas
+with `append` and fakes static binding via upper-case `expand`.
+
+Build order:
+
+1. **List-view helper** — one function reconstructing `(lambda (params…) body…)` /
+   `(lambda-macro …)` from a `Value::Lambda`/`Fexpr`. Route **every list builtin**
+   (`append`, `first`, `rest`, `last`, `nth`, `cons`, `length`, `map`, `filter`,
+   `explode`, …) through it so a lambda uniformly reads as its list form (result
+   is a plain `List`). Keep the compact form as the stored/called value.
+2. **Callable lambda-headed lists** — in `eval_list`, a `Value::List` whose head
+   is the symbol `lambda`/`fn`/`lambda-macro` is invoked as a lambda/fexpr (params
+   = 2nd element, body = rest, parsed on call). So an `append`-built lambda runs.
+3. **Printing** — a `Lambda`/`Fexpr` prints as its list form.
+4. **`expand`** builtin — `(expand expr sym…)` substitutes the named symbols'
+   values; `(expand expr)` substitutes upper-case-initial symbols whose current
+   (dynamic) value is non-`nil`. Recursive over nested lists.
+5. **`args`** builtin — the current lambda/fexpr's arguments not bound to a
+   declared parameter (unevaluated for a fexpr); a per-call stack in `Interp`.
+6. **Tests** — run the gist and check Church numerals (`ZERO`→0, `ONE`→1,
+   `(PLUS ONE TWO)`→3, `(MULT TWO THREE)`→6, `(POW TWO THREE)`→8), plus small
+   `expand`/`args` checks.
+
+**Deferred (ADR-0027):** full list *identity* for lambdas — structural `=` with
+the list form, and in-place `setf` into a lambda body. The gist needs neither.
+
+## Other candidates after the milestone
+
+Roughly by value:
 
 - **UTF-8 follow-ups** (the other half of the string arc): Unicode case folding
   for `upper-case`/`lower-case` (currently ASCII), char-based `trim`, and

@@ -54,6 +54,10 @@ _Avoid_: "lexical scope", "closure environment"
 
 **fexpr**:
 A callable that receives its arguments **unevaluated**, as list data, and decides itself whether/when to evaluate them. In newLISP this is the `lambda-macro` / `define-macro` form (a runtime, non-hygienic fexpr — not a compile-time macro). niiLISP reproduces this evaluation-time, unevaluated-argument semantics.
+
+**Lambda list (open lambda)**:
+newLISP's property that a lambda *is a list* — `(lambda (params) body…)` — so it can be built, indexed, and traversed with ordinary list operations, and code can construct functions as data. niiLISP keeps a compact internal function value but **presents this list interface on demand** (ADR-0027): list operations see a lambda as its list form, and a list whose head is `lambda`/`fn`/`lambda-macro` is callable.
+_Avoid_: "closure" (there is no lexical capture), "function object" (obscures the list nature)
 _Avoid_: "macro" (misleading — these are runtime fexprs, not hygienic/expansion macros)
 
 **FOOP**:
