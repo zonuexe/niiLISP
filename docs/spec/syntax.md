@@ -367,7 +367,10 @@ boundary.
 
 The memory API builds and reads C structs. `struct` names a layout (a list of C
 type names); `pack`/`unpack` convert between values and a binary string laid out
-as that C struct (natural alignment, padding, native byte order). `get-string`,
+as that C struct (natural alignment, padding, native byte order). `pack`/`unpack`
+also accept a terse **format string** — `c b d u ld lu Ld Lu f lf sN nN` with
+`>`/`<` endian toggles — packed tightly with no alignment (e.g.
+`(pack "c c c" 65 66 67)` → `"ABC"`). `get-string`,
 `get-int`, `get-long`, `get-float` (a C `double`), and `get-char` read a C value
 at an integer address; `address` exposes a symbol-held string's stable buffer
 pointer (valid only while the symbol is not reassigned or resized). A packed

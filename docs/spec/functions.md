@@ -124,7 +124,7 @@ List construction semantics (array-backed values, no dotted pairs) are in
 | `(import "lib" "fn" "ret" "arg"…)` | bind a C function; `nil` if unresolved |
 | `(callback 'func "ret" "arg"…)` | a C function pointer that calls `func` |
 | `(struct 'name "type"…)` | bind `name` to a struct layout (a list of C types) |
-| `(pack layout val…)` | serialise values to a binary string (native C ABI layout) |
+| `(pack layout val…)` | serialise values to a binary string |
 | `(unpack layout str)` | read a packed string back into a list of values |
 | `(get-string addr [len [limit]])` | read a C string at `addr` |
 | `(get-int addr)` `(get-long addr)` | read a 32-/64-bit integer at `addr` |
@@ -134,9 +134,18 @@ List construction semantics (array-backed values, no dotted pairs) are in
 Types: `void int long float double char* void*`. See `syntax.md` §10.
 
 A packed struct is passed to C by handing the string to a `void*` argument (no
-copy, binary-safe, valid for the call). `pack`/`unpack` use the native C ABI
-layout — natural alignment, padding, and byte order — so a packed string is
-exactly what a C function accepts as that struct. A NULL (0) pointer through
+copy, binary-safe, valid for the call). With a **struct** layout, `pack`/`unpack`
+use the native C ABI layout — natural alignment, padding, and byte order — so a
+packed string is exactly what a C function accepts as that struct.
+
+`pack`/`unpack` alternatively take a **format string** (packed tightly, no
+alignment): `c`/`b` = signed/unsigned 8-bit, `d`/`u` = 16-bit, `ld`/`lu` =
+32-bit, `Ld`/`Lu` = 64-bit, `f` = float, `lf` = double, `sN` = an N-byte string,
+`nN` = N null bytes; `>` / `<` switch the following fields to big-/little-endian
+(default: native). Whitespace between specifiers is ignored — e.g.
+`(pack "c c c" 65 66 67)` → `"ABC"`, `(unpack ">ld lf" s)`.
+
+A NULL (0) pointer through
 `unpack` (for a `char*` field) or `get-string` raises an error rather than
 dereferencing; other invalid addresses are undefined behaviour (the caller's
 risk, per ADR-0015). `address` is valid only while `sym` is neither reassigned

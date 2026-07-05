@@ -459,16 +459,282 @@ fn b_struct(interp: &Interp, args: &[Value]) -> Result<Value, Signal> {
     Ok(layout)
 }
 
-/// `(pack layout val…)` — serialise `val…` to a binary string laid out as the C
-/// struct `layout` (native alignment, padding, byte order). Pointer fields
-/// (`char*`/`void*`) take an integer address.
+// ---- the terse `pack` format-char mini-language --------------------------
+//
+// A format string is a sequence of specifiers, whitespace-separated for
+// readability, tightly packed with **no alignment or padding** (unlike a
+// struct). Specifiers (following newLISP):
+//   c  signed 8-bit   b  unsigned 8-bit
+//   d  signed 16-bit  u  unsigned 16-bit
+//   ld signed 32-bit  lu unsigned 32-bit
+//   Ld signed 64-bit  Lu unsigned 64-bit
+//   f  32-bit float   lf 64-bit double
+//   sN a string of N bytes (null-padded)   nN  N null bytes (no value)
+//   >  big endian for following fields      <   little endian for following
+
+/// Byte order for a numeric field.
+#[cfg(all(feature = "ffi", unix))]
+#[derive(Clone, Copy)]
+enum Endian {
+    Native,
+    Little,
+    Big,
+}
+
+/// One parsed format specifier.
+#[cfg(all(feature = "ffi", unix))]
+enum Field {
+    Int {
+        bytes: usize,
+        signed: bool,
+        endian: Endian,
+    },
+    F32(Endian),
+    F64(Endian),
+    /// A fixed-width string of `n` bytes (null-padded on pack).
+    Str(usize),
+    /// `n` null bytes that consume no value.
+    Pad(usize),
+}
+
+/// Read an optional decimal count (defaulting to 1) for `sN` / `nN`.
+#[cfg(all(feature = "ffi", unix))]
+fn read_count(fmt: &[u8], i: &mut usize) -> usize {
+    let mut n = 0usize;
+    let mut any = false;
+    while *i < fmt.len() && fmt[*i].is_ascii_digit() {
+        n = n * 10 + usize::from(fmt[*i] - b'0');
+        *i += 1;
+        any = true;
+    }
+    if any {
+        n
+    } else {
+        1
+    }
+}
+
+/// Parse a format string into a sequence of fields.
+#[cfg(all(feature = "ffi", unix))]
+fn parse_format(fmt: &[u8]) -> Result<Vec<Field>, Signal> {
+    let mut fields = Vec::new();
+    let mut endian = Endian::Native;
+    let mut i = 0;
+    while i < fmt.len() {
+        let c = fmt[i];
+        i += 1;
+        match c {
+            b' ' | b'\t' | b'\n' | b'\r' => {}
+            b'>' => endian = Endian::Big,
+            b'<' => endian = Endian::Little,
+            b'c' => fields.push(Field::Int {
+                bytes: 1,
+                signed: true,
+                endian,
+            }),
+            b'b' => fields.push(Field::Int {
+                bytes: 1,
+                signed: false,
+                endian,
+            }),
+            b'd' => fields.push(Field::Int {
+                bytes: 2,
+                signed: true,
+                endian,
+            }),
+            b'u' => fields.push(Field::Int {
+                bytes: 2,
+                signed: false,
+                endian,
+            }),
+            b'f' => fields.push(Field::F32(endian)),
+            b'l' => {
+                let next = fmt.get(i).copied();
+                i += 1;
+                match next {
+                    Some(b'd') => fields.push(Field::Int {
+                        bytes: 4,
+                        signed: true,
+                        endian,
+                    }),
+                    Some(b'u') => fields.push(Field::Int {
+                        bytes: 4,
+                        signed: false,
+                        endian,
+                    }),
+                    Some(b'f') => fields.push(Field::F64(endian)),
+                    _ => return Err(Signal::error("pack: `l` must be followed by d, u, or f")),
+                }
+            }
+            b'L' => {
+                let next = fmt.get(i).copied();
+                i += 1;
+                match next {
+                    Some(b'd') => fields.push(Field::Int {
+                        bytes: 8,
+                        signed: true,
+                        endian,
+                    }),
+                    Some(b'u') => fields.push(Field::Int {
+                        bytes: 8,
+                        signed: false,
+                        endian,
+                    }),
+                    _ => return Err(Signal::error("pack: `L` must be followed by d or u")),
+                }
+            }
+            b's' => fields.push(Field::Str(read_count(fmt, &mut i))),
+            b'n' => fields.push(Field::Pad(read_count(fmt, &mut i))),
+            other => {
+                return Err(Signal::Error(format!(
+                    "pack: unknown format char `{}`",
+                    other as char
+                )))
+            }
+        }
+    }
+    Ok(fields)
+}
+
+/// Reorder little-endian `le` bytes to (or from — the op is its own inverse) the
+/// wire order for `endian`. `Native` follows the host's byte order.
+#[cfg(all(feature = "ffi", unix))]
+fn order(le: &[u8], endian: Endian) -> Vec<u8> {
+    let reverse = match endian {
+        Endian::Little => false,
+        Endian::Big => true,
+        Endian::Native => cfg!(target_endian = "big"),
+    };
+    let mut v = le.to_vec();
+    if reverse {
+        v.reverse();
+    }
+    v
+}
+
+/// `pack` for the format-string path: tightly packed, no alignment.
+#[cfg(all(feature = "ffi", unix))]
+fn pack_format(fmt: &[u8], vals: &[Value]) -> Result<Value, Signal> {
+    let fields = parse_format(fmt)?;
+    let mut out = Vec::new();
+    let mut vi = 0;
+    let too_few = || Signal::error("pack: too few values for the format");
+    for f in &fields {
+        match f {
+            Field::Int { bytes, endian, .. } => {
+                let v = vals.get(vi).ok_or_else(too_few)?;
+                vi += 1;
+                let le = (to_i64(v)? as u64).to_le_bytes();
+                out.extend_from_slice(&order(&le[..*bytes], *endian));
+            }
+            Field::F32(endian) => {
+                let v = vals.get(vi).ok_or_else(too_few)?;
+                vi += 1;
+                let le = (to_f64(v)? as f32).to_bits().to_le_bytes();
+                out.extend_from_slice(&order(&le, *endian));
+            }
+            Field::F64(endian) => {
+                let v = vals.get(vi).ok_or_else(too_few)?;
+                vi += 1;
+                let le = to_f64(v)?.to_bits().to_le_bytes();
+                out.extend_from_slice(&order(&le, *endian));
+            }
+            Field::Str(n) => {
+                let v = vals.get(vi).ok_or_else(too_few)?;
+                vi += 1;
+                let bytes = match v {
+                    Value::Str(b) => b,
+                    _ => return Err(Signal::error("pack: `s` field expects a string")),
+                };
+                let start = out.len();
+                out.resize(start + n, 0);
+                let m = bytes.len().min(*n);
+                out[start..start + m].copy_from_slice(&bytes[..m]);
+            }
+            Field::Pad(n) => out.resize(out.len() + n, 0),
+        }
+    }
+    Ok(Value::Str(out))
+}
+
+/// `unpack` for the format-string path.
+#[cfg(all(feature = "ffi", unix))]
+fn unpack_format(fmt: &[u8], data: &[u8]) -> Result<Value, Signal> {
+    let fields = parse_format(fmt)?;
+    let mut out = Vec::new();
+    let mut off = 0usize;
+    let take = |off: &mut usize, n: usize| -> Result<Vec<u8>, Signal> {
+        if *off + n > data.len() {
+            return Err(Signal::error("unpack: string is shorter than the format"));
+        }
+        let s = data[*off..*off + n].to_vec();
+        *off += n;
+        Ok(s)
+    };
+    for f in &fields {
+        match f {
+            Field::Int {
+                bytes,
+                signed,
+                endian,
+            } => {
+                let le = order(&take(&mut off, *bytes)?, *endian);
+                let mut u = 0u64;
+                for (k, b) in le.iter().enumerate() {
+                    u |= u64::from(*b) << (8 * k);
+                }
+                let val = if *signed && *bytes < 8 {
+                    let shift = 64 - 8 * bytes;
+                    ((u << shift) as i64) >> shift
+                } else {
+                    u as i64
+                };
+                out.push(Value::Int(val));
+            }
+            Field::F32(endian) => {
+                let le = order(&take(&mut off, 4)?, *endian);
+                let bits = u32::from_le_bytes(le.try_into().unwrap());
+                out.push(Value::Float(f64::from(f32::from_bits(bits))));
+            }
+            Field::F64(endian) => {
+                let le = order(&take(&mut off, 8)?, *endian);
+                let bits = u64::from_le_bytes(le.try_into().unwrap());
+                out.push(Value::Float(f64::from_bits(bits)));
+            }
+            Field::Str(n) => out.push(Value::Str(take(&mut off, *n)?)),
+            Field::Pad(n) => {
+                take(&mut off, *n)?;
+            }
+        }
+    }
+    Ok(Value::List(out))
+}
+
+/// `(pack layout val…)` — serialise `val…` to a binary string. `layout` is
+/// either a **struct** (a list of C type names — native alignment, padding, and
+/// byte order, so the bytes match a real C struct) or a **format string** (the
+/// terse `c b d u ld lu Ld Lu f lf sN nN` mini-language with `>`/`<` endian
+/// toggles — tightly packed, no alignment).
 #[cfg(all(feature = "ffi", unix))]
 fn b_pack(_interp: &Interp, args: &[Value]) -> Result<Value, Signal> {
     let layout = args
         .first()
         .ok_or_else(|| Signal::error("pack: missing layout"))?;
-    let types = layout_types(layout)?;
     let vals = &args[1..];
+    match layout {
+        Value::Str(fmt) => pack_format(fmt, vals),
+        Value::List(_) => pack_struct(layout, vals),
+        _ => Err(Signal::error(
+            "pack: layout must be a struct or a format string",
+        )),
+    }
+}
+
+/// `pack` for the struct path: native C ABI layout (alignment + padding).
+/// Pointer fields (`char*`/`void*`) take an integer address.
+#[cfg(all(feature = "ffi", unix))]
+fn pack_struct(layout: &Value, vals: &[Value]) -> Result<Value, Signal> {
+    let types = layout_types(layout)?;
     if vals.len() < types.len() {
         return Err(Signal::error("pack: too few values for the struct layout"));
     }
@@ -493,22 +759,35 @@ fn b_pack(_interp: &Interp, args: &[Value]) -> Result<Value, Signal> {
     Ok(Value::Str(buf))
 }
 
-/// `(unpack layout str)` — the inverse of `pack`: read each field of `layout`
-/// from `str` and return the values as a list. A pointer field is dereferenced
-/// (`char*` -> the pointed-to C string); a NULL pointer raises an error.
+/// `(unpack layout str)` — the inverse of `pack`. `layout` is a struct or a
+/// format string (see `b_pack`); returns a list of values. In the struct path a
+/// pointer field is dereferenced (`char*` -> the pointed-to C string) and a NULL
+/// pointer raises an error.
 #[cfg(all(feature = "ffi", unix))]
 fn b_unpack(_interp: &Interp, args: &[Value]) -> Result<Value, Signal> {
-    use std::ffi::CStr;
-    use std::os::raw::c_char;
-
     let layout = args
         .first()
         .ok_or_else(|| Signal::error("unpack: missing layout"))?;
-    let types = layout_types(layout)?;
-    let bytes = match args.get(1) {
+    let data = match args.get(1) {
         Some(Value::Str(b)) => b,
         _ => return Err(Signal::error("unpack: second argument must be a string")),
     };
+    match layout {
+        Value::Str(fmt) => unpack_format(fmt, data),
+        Value::List(_) => unpack_struct(layout, data),
+        _ => Err(Signal::error(
+            "unpack: layout must be a struct or a format string",
+        )),
+    }
+}
+
+/// `unpack` for the struct path (native C ABI layout).
+#[cfg(all(feature = "ffi", unix))]
+fn unpack_struct(layout: &Value, bytes: &[u8]) -> Result<Value, Signal> {
+    use std::ffi::CStr;
+    use std::os::raw::c_char;
+
+    let types = layout_types(layout)?;
     let (offsets, total) = layout_offsets(&types);
     if bytes.len() < total {
         return Err(Signal::error(
@@ -668,3 +947,119 @@ pub fn install(interp: &Interp) {
 
 #[cfg(not(all(feature = "ffi", unix)))]
 pub fn install(_interp: &Interp) {}
+
+#[cfg(all(feature = "ffi", unix))]
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // `Signal` isn't `Debug`, so `Result::unwrap` is unavailable here.
+    fn ok(r: Result<Value, Signal>) -> Value {
+        match r {
+            Ok(v) => v,
+            Err(_) => panic!("expected Ok"),
+        }
+    }
+
+    fn bytes(v: Value) -> Vec<u8> {
+        match v {
+            Value::Str(b) => b,
+            _ => panic!("expected a string"),
+        }
+    }
+
+    fn ints(v: Value) -> Vec<i64> {
+        match v {
+            Value::List(items) => items
+                .into_iter()
+                .map(|x| match x {
+                    Value::Int(n) => n,
+                    _ => panic!("expected an int field"),
+                })
+                .collect(),
+            _ => panic!("expected a list"),
+        }
+    }
+
+    /// Pack `vals` with `fmt`, then unpack with `fmt` again.
+    fn round(fmt: &[u8], vals: &[Value]) -> Value {
+        ok(unpack_format(fmt, &bytes(ok(pack_format(fmt, vals)))))
+    }
+
+    #[test]
+    fn format_widths_and_signedness() {
+        assert_eq!(bytes(ok(pack_format(b"c", &[Value::Int(65)]))), vec![65]);
+        // A signed byte sees 0xFF as -1; an unsigned byte sees 255.
+        let packed = bytes(ok(pack_format(b"b", &[Value::Int(255)])));
+        assert_eq!(ints(ok(unpack_format(b"c", &packed))), vec![-1]);
+        assert_eq!(ints(ok(unpack_format(b"b", &packed))), vec![255]);
+        // 32-/64-bit signed round-trips.
+        assert_eq!(
+            ints(round(b"ld", &[Value::Int(-1_000_000)])),
+            vec![-1_000_000]
+        );
+        assert_eq!(
+            ints(round(b"Ld", &[Value::Int(123_456_789_012)])),
+            vec![123_456_789_012]
+        );
+    }
+
+    #[test]
+    fn format_endianness() {
+        // 0x1234 packs big-endian as [0x12, 0x34], little-endian reversed.
+        assert_eq!(
+            bytes(ok(pack_format(b">d", &[Value::Int(0x1234)]))),
+            vec![0x12, 0x34]
+        );
+        assert_eq!(
+            bytes(ok(pack_format(b"<d", &[Value::Int(0x1234)]))),
+            vec![0x34, 0x12]
+        );
+        // A toggle applies to following fields only.
+        assert_eq!(
+            bytes(ok(pack_format(
+                b">d <d",
+                &[Value::Int(0x1234), Value::Int(0x1234)]
+            ))),
+            vec![0x12, 0x34, 0x34, 0x12]
+        );
+        assert_eq!(ints(round(b">Ld", &[Value::Int(-5)])), vec![-5]);
+    }
+
+    #[test]
+    fn format_string_and_pad() {
+        // `s5` null-pads; `n2` writes two nulls and consumes no value.
+        let packed = bytes(ok(pack_format(
+            b"s5 n2 c",
+            &[Value::Str(b"hi".to_vec()), Value::Int(66)],
+        )));
+        assert_eq!(packed, vec![b'h', b'i', 0, 0, 0, 0, 0, 66]);
+        match ok(unpack_format(b"s5 n2 c", &packed)) {
+            Value::List(items) => {
+                assert_eq!(items.len(), 2, "pad consumes no value");
+                assert!(matches!(&items[0], Value::Str(s) if s == b"hi\0\0\0"));
+                assert!(matches!(items[1], Value::Int(66)));
+            }
+            _ => panic!("expected a list"),
+        }
+    }
+
+    #[test]
+    fn format_float_roundtrip() {
+        match round(b"f lf", &[Value::Float(3.5), Value::Float(2.5)]) {
+            Value::List(items) => {
+                assert!(matches!(items[0], Value::Float(f) if f == 3.5));
+                assert!(matches!(items[1], Value::Float(f) if f == 2.5));
+            }
+            _ => panic!("expected a list"),
+        }
+    }
+
+    #[test]
+    fn format_errors() {
+        assert!(pack_format(b"z", &[]).is_err(), "unknown char");
+        assert!(pack_format(b"l", &[]).is_err(), "dangling l");
+        assert!(pack_format(b"c", &[]).is_err(), "too few values");
+        assert!(unpack_format(b"Ld", b"\x01\x02").is_err(), "short input");
+    }
+}

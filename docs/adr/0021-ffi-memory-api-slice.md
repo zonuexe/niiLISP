@@ -9,7 +9,9 @@ exchange structured data. Acceptance target: the vendored `qa-nullstring`.
 - **In:** `struct`, `pack`/`unpack`, the `get-*` readers (`get-string`,
   `get-int`, `get-long`, `get-float`, `get-char`), and `address`.
 - **Deferred:** the terse `pack` format-char mini-language (`c b d lf n s …`) and
-  its endianness toggles (`>` / `<`).
+  its endianness toggles (`>` / `<`). _(Update: subsequently implemented —
+  `pack`/`unpack` accept a format string as well as a struct; see the changelog
+  and `docs/spec/functions.md`.)_
 
 ## struct and pack/unpack
 

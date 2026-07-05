@@ -15,7 +15,7 @@ what is deliberately deferred, so work can resume without re-deriving context.
   (`struct`/`pack`/`unpack`/`get-*`/`address`, ADR-0021); `case`/`if-not`
   promoted to full special forms; a language spec under [`docs/spec/`](spec/)
   (syntax, types, special-forms, functions).
-- Tests: 31 unit + 5 integration (`qa-exception`, `qa-foop`, `qa-nullstring`,
+- Tests: 36 unit + 5 integration (`qa-exception`, `qa-foop`, `qa-nullstring`,
   and two hermetic `ffi` tests).
 
 ## Next task — pick up here: FFI follow-ups, then bigint
@@ -25,13 +25,13 @@ The **FFI memory API slice is done** ([ADR-0021](adr/0021-ffi-memory-api-slice.m
 `get-long`/`get-float` (a C double)/`get-char`, and `address` (symbol-held
 strings only), plus `import`'s `void*` argument now accepts a string (passes its
 buffer pointer, no copy). NULL through `unpack`/`get-string` errors instead of
-crashing. `qa-nullstring` passes and is wired into `tests/qa.rs`.
+crashing. `qa-nullstring` passes and is wired into `tests/qa.rs`. The terse
+**`pack`/`unpack` format-string mini-language** (`c b d u ld lu Ld Lu f lf sN nN`
+with `>`/`<` endian toggles, packed tightly) is also in — the ADR-0021 deferral
+is closed.
 
 Remaining FFI slices, then the next headline feature (roughly in order):
 
-- **`pack` format-char mini-language** — the terse `c b d lf n s …` layout syntax
-  with endian toggles (`>`/`<`), deferred from ADR-0021. `pack`/`unpack` currently
-  take a `struct` (list of type-name strings) only.
 - **`address` of scalars / write-through** — `address` today only exposes a
   symbol-held *string* buffer. Symbol-held numbers have no separate buffer under
   the current value model; revisit if a test needs write-through to a scalar.
@@ -75,8 +75,8 @@ integration targets unlocked as their dependencies land.
   ([ADR-0020](adr/0020-ffi-callback-slice.md)), and the memory API
   ([ADR-0021](adr/0021-ffi-memory-api-slice.md): `struct`/`pack`/`unpack`/`get-*`/
   `address`), Unix + system libffi ([ADR-0018](adr/0018-ffi-build-and-packaging.md)).
-  Remaining FFI slices: the terse `pack` format-char language, simple/untyped
-  `import`, and Windows FFI. `qa-libffi` additionally needs `exec`/`real-path`.
+  Remaining FFI slices: simple/untyped `import` and Windows FFI. `qa-libffi`
+  additionally needs `exec`/`real-path`.
 - **bigint** — `L` literals + `Value::Bigint`; unlocks `qa-bigint`, `qa-longnum`,
   and the tail of `qa-factorfibo`.
 - **Contexts as namespaces/dictionaries** — beyond FOOP; unlocks `qa-dictionary`.
