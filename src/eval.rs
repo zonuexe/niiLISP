@@ -515,6 +515,7 @@ impl Interp {
             "--" | "dec" => self.sf_incr(args, -1),
             "push" => self.sf_push(args),
             "pop" => self.sf_pop(args),
+            "swap" => self.sf_swap(args),
             "reverse" => self.sf_reverse(args),
             "sort" => self.sf_sort(args),
             "rotate" => self.sf_rotate(args),
@@ -970,6 +971,28 @@ impl Interp {
             list.insert(at.min(list.len()), value);
             Ok(loc.clone())
         })
+    }
+
+    fn sf_swap(&self, args: &[Value]) -> Result<Value, Signal> {
+        // (swap place-a place-b) — exchange the values at two places, returning
+        // the first place's new value. Writes replace values (no resize), so two
+        // places into the same list stay valid across the exchange.
+        if args.len() != 2 {
+            return Err(Signal::error("swap: expected (swap place-a place-b)"));
+        }
+        let pa = self.resolve_place(&args[0])?;
+        let pb = self.resolve_place(&args[1])?;
+        let va = self.with_place_mut(&pa, |v| Ok(v.clone()))?;
+        let vb = self.with_place_mut(&pb, |v| Ok(v.clone()))?;
+        self.with_place_mut(&pa, |v| {
+            *v = vb.clone();
+            Ok(())
+        })?;
+        self.with_place_mut(&pb, |v| {
+            *v = va;
+            Ok(())
+        })?;
+        Ok(vb)
     }
 
     fn sf_pop(&self, args: &[Value]) -> Result<Value, Signal> {
@@ -2273,6 +2296,38 @@ mod tests {
             "(set 'x 100000000000000000000L) (++ x 5) (= x 100000000000000000005L)"
         ));
         assert!(is_true("(set 'x 5L) (-- x 2L) (= x 3L)"));
+    }
+
+    #[test]
+    fn min_max_and_parity() {
+        assert_eq!(as_int(run("(min 3 1 2)")), 1);
+        assert_eq!(as_int(run("(max 3 1 2)")), 3);
+        assert_eq!(as_float(run("(min 3 2.5 4)")), 2.5);
+        assert!(is_true("(even? 4)"));
+        assert!(is_true("(not (even? 3))"));
+        assert!(is_true("(odd? 7)"));
+    }
+
+    #[test]
+    fn flat_join_member_unique() {
+        assert!(is_true("(= (flat '(1 (2 (3)) 4)) '(1 2 3 4))"));
+        assert_eq!(as_str(run("(join '(\"a\" \"b\" \"c\") \"-\")")), "a-b-c");
+        assert_eq!(as_str(run("(join '(\"x\" \"y\"))")), "xy");
+        assert!(is_true("(= (member 3 '(1 2 3 4)) '(3 4))"));
+        assert_eq!(as_str(run("(member \"l\" \"hello\")")), "llo");
+        assert!(matches!(run("(member 9 '(1 2 3))"), Value::Nil));
+        assert!(is_true("(= (unique '(1 2 2 3 1 4)) '(1 2 3 4))"));
+    }
+
+    #[test]
+    fn swap_places() {
+        assert!(is_true(
+            "(set 'a 10) (set 'b 20) (swap a b) (and (= a 20) (= b 10))"
+        ));
+        // Swapping two elements of the same list stays valid across the exchange.
+        assert!(is_true(
+            "(set 'l '(1 2 3)) (swap (nth 0 l) (nth 2 l)) (= l '(3 2 1))"
+        ));
     }
 
     #[test]

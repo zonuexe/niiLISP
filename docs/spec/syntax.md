@@ -390,16 +390,16 @@ addresses are undefined behaviour. FFI is Unix-only for now.
 Not exhaustive; a categorised map of the built-in vocabulary. For a per-function
 list see [`functions.md`](functions.md).
 
-- **Integer arithmetic** (wrapping): `+ - * / %`. A bigint operand makes these
-  arbitrary-precision; `bigint`/`gcd` convert and combine bigints.
+- **Integer arithmetic** (wrapping): `+ - * / %`, `min max`. A bigint operand
+  makes these arbitrary-precision; `bigint`/`gcd` convert and combine bigints.
 - **Float arithmetic**: `add sub mul div`, `sqrt pow exp log`, `sin cos tan
   asin acos atan`, `abs`, `mod` (NaN on zero divisor). `int` / `float` convert.
 - **Comparison**: `= != < > <= >=` (numeric or string; NaN compares as false).
 - **Bitwise**: `& | ^ << >>`.
 - **Lists**: `list cons first rest last nth length append reverse sort`,
-  `map apply filter sequence dup`.
+  `map apply filter sequence dup flat member unique join swap`.
 - **Predicates**: `nil? null? true? integer? float? number? string? symbol?
-  list? atom? zero? empty? NaN? inf?`.
+  list? atom? zero? empty? even? odd? NaN? inf?`.
 - **Strings / sequences**: `string starts-with ends-with char upper-case
   lower-case trim slice find explode chop`, `format` (printf subset: flags,
   width, `.precision`, and `d i u f e g x X o s c`).

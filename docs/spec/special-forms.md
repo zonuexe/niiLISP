@@ -355,6 +355,16 @@ value. An unset/`nil` place counts as 0.
 = end) and returns the modified list; a `nil` place becomes a new list. `pop`
 removes and returns an element (default the front); an empty list yields `nil`.
 
+### `swap`
+
+```
+(swap place-a place-b)
+```
+
+Exchanges the values at two places and returns `place-a`'s new value. Writes
+replace values (never resize), so two places into the same list stay valid across
+the exchange.
+
 ### `reverse` / `sort` / `rotate`
 
 ```

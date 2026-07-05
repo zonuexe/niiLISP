@@ -112,6 +112,14 @@ pub fn install(interp: &Interp) {
     reg("find", b_find);
     reg("chop", b_chop);
     reg("explode", b_explode);
+    reg("flat", b_flat);
+    reg("join", b_join);
+    reg("member", b_member);
+    reg("unique", b_unique);
+    reg("min", b_min);
+    reg("max", b_max);
+    reg("even?", is_even);
+    reg("odd?", is_odd);
     // RNG and process environment.
     reg("seed", b_seed);
     reg("rand", b_rand);
@@ -1419,6 +1427,147 @@ fn b_random(interp: &Interp, args: &[Value]) -> Result<Value, Signal> {
         (Some(_), None, _) => Err(Signal::error(
             "random: expected (random) or (random offset scale [count])",
         )),
+    }
+}
+
+/// The extreme (smallest for `Less`, largest for `Greater`) numeric argument,
+/// preserving its type. NaN operands are skipped.
+fn extreme(args: &[Value], name: &str, want: Ordering) -> Result<Value, Signal> {
+    let mut best = args
+        .first()
+        .ok_or_else(|| Signal::error(format!("{}: expected at least one argument", name)))?;
+    if as_f64_opt(best).is_none() {
+        return Err(Signal::error(format!("{}: expected numbers", name)));
+    }
+    for a in &args[1..] {
+        match compare_num(a, best) {
+            Some(Some(o)) if o == want => best = a,
+            Some(_) => {}
+            None => return Err(Signal::error(format!("{}: expected numbers", name))),
+        }
+    }
+    Ok(best.clone())
+}
+
+fn b_min(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    extreme(args, "min", Ordering::Less)
+}
+
+fn b_max(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    extreme(args, "max", Ordering::Greater)
+}
+
+/// Parity test for `even?` / `odd?`. Floats are truncated to integer first.
+fn parity_even(v: &Value) -> Result<bool, Signal> {
+    match v {
+        Value::Int(n) => Ok(n % 2 == 0),
+        Value::Float(f) => Ok((*f as i64) % 2 == 0),
+        // Parity of a bigint is the parity of its low magnitude digit.
+        #[cfg(feature = "bigint")]
+        Value::Bigint(b) => Ok(b.to_u64_digits().1.first().copied().unwrap_or(0) % 2 == 0),
+        _ => Err(Signal::error("even?/odd?: expected an integer")),
+    }
+}
+
+fn is_even(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    Ok(boolean(parity_even(args.first().unwrap_or(&Value::Nil))?))
+}
+
+fn is_odd(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    Ok(boolean(!parity_even(args.first().unwrap_or(&Value::Nil))?))
+}
+
+/// `(flat lst)` — flatten a nested list into a single-level list.
+fn b_flat(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    fn go(v: &Value, out: &mut Vec<Value>) {
+        match v {
+            Value::List(items) => items.iter().for_each(|it| go(it, out)),
+            other => out.push(other.clone()),
+        }
+    }
+    match args.first() {
+        Some(v @ Value::List(_)) => {
+            let mut out = Vec::new();
+            go(v, &mut out);
+            Ok(Value::List(out))
+        }
+        Some(Value::Nil) | None => Ok(Value::List(Vec::new())),
+        _ => Err(Signal::error("flat: expected a list")),
+    }
+}
+
+/// `(join list-of-strings [separator])` — concatenate strings with an optional
+/// separator between them.
+fn b_join(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    let list = match args.first() {
+        Some(Value::List(l)) => l,
+        _ => return Err(Signal::error("join: expected a list of strings")),
+    };
+    let sep: &[u8] = match args.get(1) {
+        Some(Value::Str(s)) => s,
+        None => b"",
+        _ => return Err(Signal::error("join: separator must be a string")),
+    };
+    let mut out = Vec::new();
+    for (i, item) in list.iter().enumerate() {
+        if i > 0 {
+            out.extend_from_slice(sep);
+        }
+        match item {
+            Value::Str(b) => out.extend_from_slice(b),
+            _ => return Err(Signal::error("join: list elements must be strings")),
+        }
+    }
+    Ok(Value::Str(out))
+}
+
+/// `(member key seq)` — the tail of a list from the first element equal to `key`
+/// (structurally), or the substring of a string from the first match; else `nil`.
+fn b_member(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    let key = args
+        .first()
+        .ok_or_else(|| Signal::error("member: missing key"))?;
+    match args.get(1) {
+        Some(Value::List(l)) => match l.iter().position(|x| values_equal(x, key)) {
+            Some(i) => Ok(Value::List(l[i..].to_vec())),
+            None => Ok(Value::Nil),
+        },
+        Some(Value::Str(s)) => {
+            let k = match key {
+                Value::Str(k) => k,
+                _ => {
+                    return Err(Signal::error(
+                        "member: a string haystack needs a string key",
+                    ))
+                }
+            };
+            if k.is_empty() {
+                return Ok(Value::Str(s.clone()));
+            }
+            match s.windows(k.len()).position(|w| w == k.as_slice()) {
+                Some(i) => Ok(Value::Str(s[i..].to_vec())),
+                None => Ok(Value::Nil),
+            }
+        }
+        _ => Err(Signal::error("member: expected a list or string")),
+    }
+}
+
+/// `(unique lst)` — a copy of the list with duplicate elements removed, keeping
+/// the first occurrence of each.
+fn b_unique(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    match args.first() {
+        Some(Value::List(l)) => {
+            let mut out: Vec<Value> = Vec::new();
+            for item in l {
+                if !out.iter().any(|x| values_equal(x, item)) {
+                    out.push(item.clone());
+                }
+            }
+            Ok(Value::List(out))
+        }
+        Some(Value::Nil) | None => Ok(Value::List(Vec::new())),
+        _ => Err(Signal::error("unique: expected a list")),
     }
 }
 

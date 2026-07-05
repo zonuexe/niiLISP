@@ -19,6 +19,8 @@ in [`special-forms.md`](special-forms.md); the language overview is in
 | `(/ n…)` | integer quotient; error on divide by zero |
 | `(% a b)` | integer remainder; error on zero divisor |
 | `(gcd a b…)` | greatest common divisor (accepts bigints; `bigint` feature) |
+| `(min n…)` `(max n…)` | smallest / largest argument (type preserved) |
+| `(even? n)` `(odd? n)` | integer parity (accepts bigints) |
 
 A bigint operand makes `+ - * / %` compute in arbitrary precision (see
 [`types.md`](types.md) → bigint); a float operand is truncated to an integer.
@@ -69,9 +71,13 @@ A bigint operand makes `+ - * / %` compute in arbitrary precision (see
 | `(length x)` | list length, or string **byte** length |
 | `(append lst…)` | concatenate lists (or strings) into a copy |
 | `(sequence from to [step])` | list of numbers, inclusive |
+| `(flat lst)` | flatten a nested list to a single level |
+| `(member key seq)` | tail of a list / substring of a string from the first match |
+| `(unique lst)` | copy with duplicate elements removed (first kept) |
+| `(join lst [sep])` | concatenate a list of strings with an optional separator |
 
 List construction semantics (array-backed values, no dotted pairs) are in
-[`types.md`](types.md). Destructive list operators (`push`, `pop`, `reverse`,
+[`types.md`](types.md). Destructive list operators (`push`, `pop`, `swap`, `reverse`,
 `sort`, `rotate`, `replace`, `set-ref`) are **special forms** — see
 [`special-forms.md`](special-forms.md).
 

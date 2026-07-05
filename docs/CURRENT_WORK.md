@@ -16,23 +16,26 @@ what is deliberately deferred, so work can resume without re-deriving context.
   (arbitrary-precision integers, ADR-0022); `case`/`if-not` promoted to full
   special forms; a language spec under [`docs/spec/`](spec/) (syntax, types,
   special-forms, functions).
-- Tests: 47 unit + 7 integration (`qa-exception`, `qa-foop`, `qa-nullstring`,
+- Tests: 50 unit + 7 integration (`qa-exception`, `qa-foop`, `qa-nullstring`,
   `qa-bigint`, `qa-longnum`, and two hermetic `ffi` tests); the suite passes
   under both default features and `--no-default-features`.
 - Standard-library fill-ins (byte-based, no UTF-8 dependency): string builtins
   `upper-case`/`lower-case`/`trim`/`slice`/`find`/`explode`/`chop`, the RNG
-  (`seed`/`rand`/`random`/`amb`), `main-args`, and the `dostring`/`until`/`extend`
-  special forms — closing the `qa-bigint`/`qa-longnum` helper gap.
+  (`seed`/`rand`/`random`/`amb`), `main-args`, the list/number builtins
+  `min`/`max`/`even?`/`odd?`/`flat`/`join`/`member`/`unique`, and the
+  `dostring`/`until`/`extend`/`swap` special forms.
 
 ## Next task — pick up here: choose the next slice
 
 The FFI and bigint arcs are complete and their qa targets pass. Pick the next
 piece; the roadmap below has the full list. Leading candidates:
 
-- **`qa-factorfibo` tail** — the closest remaining qa target. It needs `primes`
-  (a sieve builtin) and uses the bigint machinery already in place; check the
-  script for any other gap (`push … -1`, `dup`, etc. already exist). No ADR
-  needed — `primes` is an ordinary builtin.
+- **`qa-factorfibo` tail** — uses the bigint machinery already in place, but is
+  blocked on newLISP **arrays**: it calls `array` / `array-list` (its `primes`
+  sieve is array-based). Arrays are a distinct newLISP type (own `array?`, print
+  syntax, fixed size), so this **wants a grilled ADR** first — decide whether to
+  add a `Value::Array` variant or alias arrays to lists. (`swap`, the other gap,
+  is now implemented.)
 - **qa-ref tail** — context-as-hash, string-byte places (`(setf (s 3) "D")`),
   and `eval`/loop place-returns. Touches the place model; scope it first.
 - **Contexts as namespaces/dictionaries** or **UTF-8 char ops**
