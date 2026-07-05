@@ -53,3 +53,28 @@ safe, zero-native-dependency character of the v0.1.0 crate.
 - All `unsafe` FFI code is gated behind `#[cfg(all(feature = "ffi", unix))]` and
   confined to the FFI module (ADR-0015); the pure build remains 100% safe Rust.
 - The published crate gains its first dependencies (Unix-only).
+
+## Release matrix (revised 2026-07, before the first FFI release)
+
+To ship `ffi`-enabled binaries on every Unix target without cross-compiling
+(which fails to link the target's libffi), the release workflow builds each Unix
+target on a **native runner** and installs the system libffi on Linux; Windows
+builds pure. `cargo install niilisp` builds from source, so it already gets FFI
+on Unix regardless of the prebuilt binaries — the goal here is only that the
+convenience binaries carry the headline `import` feature where they can.
+
+| target | runner (native) | build | libffi |
+| --- | --- | --- | --- |
+| `x86_64-unknown-linux-gnu` | `ubuntu-latest` | default (`ffi`) | `apt-get install libffi-dev` |
+| `aarch64-unknown-linux-gnu` | `ubuntu-24.04-arm` | default (`ffi`) | `apt-get install libffi-dev` |
+| `x86_64-apple-darwin` | `macos-13` | default (`ffi`) | SDK-provided |
+| `aarch64-apple-darwin` | `macos-latest` | default (`ffi`) | SDK-provided |
+| `x86_64-pc-windows-msvc` | `windows-latest` | `--no-default-features` | — |
+
+- **No cross-compilation.** `aarch64-linux` uses GitHub's native arm64 runner and
+  `x86_64-darwin` uses a native x86_64 macOS runner, so `-lffi` always resolves to
+  the runner's own libffi.
+- **Rejected: all binaries `--no-default-features`.** Simplest CI, but it drops
+  `import` from every downloaded binary — a surprise for scripts that use it, and
+  a poor fit for compatibility-first (ADR-0001). Native runners make FFI binaries
+  cheap enough that this is not needed.

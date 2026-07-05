@@ -54,27 +54,38 @@ jobs:
 
   binaries:
     needs: publish-crate # upload to the Release created above
+    # Each Unix target builds on a NATIVE runner so it links its own system
+    # libffi (no cross-compilation); Windows builds pure. See ADR-0018.
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-latest # x86_64 Linux (native)
             target: x86_64-unknown-linux-gnu
-          - os: ubuntu-latest
+          - os: ubuntu-24.04-arm # arm64 Linux (native)
             target: aarch64-unknown-linux-gnu
-          - os: macos-latest
+          - os: macos-13 # x86_64 macOS (native)
             target: x86_64-apple-darwin
-          - os: macos-latest
+          - os: macos-latest # arm64 macOS (native)
             target: aarch64-apple-darwin
-          - os: windows-latest
+          - os: windows-latest # Windows ships pure (no FFI)
             target: x86_64-pc-windows-msvc
+            no-default-features: true
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
+
+      # The `ffi` feature dynamically links the system libffi (ADR-0018).
+      - name: Install libffi (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libffi-dev
+
       - name: Build and upload binary
         uses: taiki-e/upload-rust-binary-action@v1
         with:
           bin: niilisp
           target: ${{ matrix.target }}
           archive: $bin-$tag-$target
+          # Unix ships with the default `ffi`; Windows ships pure.
+          no-default-features: ${{ matrix.no-default-features || false }}
           token: ${{ secrets.GITHUB_TOKEN }}

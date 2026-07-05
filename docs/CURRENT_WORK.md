@@ -170,14 +170,15 @@ integration targets unlocked as their dependencies land.
   retrospective.
 - **Networking** — `net-*`; unlocks `qa-lookup6`.
 
-## Release pipeline TODO (before the next tag)
+## Release pipeline (resolved)
 
-`release.yml` builds prebuilt binaries for 5 platforms with **default features**
-(now including `ffi`). Since FFI uses the *system* libffi and is Unix-only
-(ADR-0018), the current release matrix would fail on Windows and on cross-compiled
-`aarch64-linux`. Before tagging v0.2.0, decide per target: build the prebuilt
-binaries with `--no-default-features` (simplest, drops FFI from downloads but
-`cargo install` still gets it), or install/cross-provide libffi per target.
+`release.yml`'s binary matrix is **resolved** (ADR-0018 "Release matrix"): each
+Unix target builds on a **native** runner (incl. `ubuntu-24.04-arm` for
+`aarch64-linux` and `macos-13` for `x86_64-darwin`) with the default `ffi`
+feature and a `libffi-dev` install on Linux — no cross-compilation. Windows
+builds `--no-default-features` (pure, FFI deferred). So downloaded Unix binaries
+carry `import`; the Windows binary does not; `cargo install` gets FFI from source
+on Unix regardless. Nothing else blocks tagging.
 
 ## Releasing
 
