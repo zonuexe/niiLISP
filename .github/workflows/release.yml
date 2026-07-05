@@ -64,8 +64,6 @@ jobs:
             target: x86_64-unknown-linux-gnu
           - os: ubuntu-24.04-arm # arm64 Linux (native)
             target: aarch64-unknown-linux-gnu
-          - os: macos-13 # x86_64 macOS (native)
-            target: x86_64-apple-darwin
           - os: macos-latest # arm64 macOS (native)
             target: aarch64-apple-darwin
           - os: windows-latest # Windows ships pure (no FFI)

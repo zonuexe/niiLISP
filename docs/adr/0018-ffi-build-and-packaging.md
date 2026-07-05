@@ -67,13 +67,16 @@ convenience binaries carry the headline `import` feature where they can.
 | --- | --- | --- | --- |
 | `x86_64-unknown-linux-gnu` | `ubuntu-latest` | default (`ffi`) | `apt-get install libffi-dev` |
 | `aarch64-unknown-linux-gnu` | `ubuntu-24.04-arm` | default (`ffi`) | `apt-get install libffi-dev` |
-| `x86_64-apple-darwin` | `macos-13` | default (`ffi`) | SDK-provided |
 | `aarch64-apple-darwin` | `macos-latest` | default (`ffi`) | SDK-provided |
 | `x86_64-pc-windows-msvc` | `windows-latest` | `--no-default-features` | — |
 
-- **No cross-compilation.** `aarch64-linux` uses GitHub's native arm64 runner and
-  `x86_64-darwin` uses a native x86_64 macOS runner, so `-lffi` always resolves to
-  the runner's own libffi.
+- **No cross-compilation.** `aarch64-linux` uses GitHub's native arm64 runner, so
+  `-lffi` always resolves to the runner's own libffi.
+- **No `x86_64-apple-darwin`.** v0.2.0 shipped four binaries; the Intel-macOS
+  target was dropped afterwards — there is no real demand, and GitHub's `macos-13`
+  (Intel) runners queue unreliably and are being retired. Intel-Mac users install
+  from source (`cargo install`, which still gets FFI). Revisit only if demand
+  appears.
 - **Rejected: all binaries `--no-default-features`.** Simplest CI, but it drops
   `import` from every downloaded binary — a surprise for scripts that use it, and
   a poor fit for compatibility-first (ADR-0001). Native runners make FFI binaries
