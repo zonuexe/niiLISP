@@ -522,6 +522,37 @@ fn b_env(_i: &Interp, args: &[Value]) -> Result<Value, Signal> {
     }
 }
 
+// ---- source serialisation: source / save / load (ADR-0030) ---------------
+
+fn build_source(interp: &Interp, syms: &[Value]) -> Result<String, Signal> {
+    let mut out = String::new();
+    for s in syms {
+        match s {
+            Value::Symbol(id) | Value::Context(id) => out.push_str(&interp.source_of(*id)),
+            _ => return Err(Signal::error("save/source: expected symbols")),
+        }
+    }
+    Ok(out)
+}
+
+fn b_source(interp: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    Ok(Value::str(build_source(interp, args)?.into_bytes()))
+}
+
+fn b_save(interp: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    let path = path_arg(args.first(), "save")?;
+    let src = build_source(interp, args.get(1..).unwrap_or(&[]))?;
+    Ok(bool_result(fs::write(&path, src).is_ok()))
+}
+
+fn b_load(interp: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    let path = path_arg(args.first(), "load")?;
+    match fs::read(&path) {
+        Ok(bytes) => interp.read_and_eval(&bytes),
+        Err(_) => Ok(Value::Nil),
+    }
+}
+
 pub fn install(interp: &Interp) {
     interp.register_builtin("open", b_open);
     interp.register_builtin("close", b_close);
@@ -543,5 +574,8 @@ pub fn install(interp: &Interp) {
     interp.register_builtin("directory?", b_directory_q);
     interp.register_builtin("file-info", b_file_info);
     interp.register_builtin("env", b_env);
+    interp.register_builtin("source", b_source);
+    interp.register_builtin("save", b_save);
+    interp.register_builtin("load", b_load);
     // `read-buffer` is a place-taking special form (see `sf_read_buffer`).
 }

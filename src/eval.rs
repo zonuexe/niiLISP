@@ -612,6 +612,49 @@ impl Interp {
         self.globals.borrow().len()
     }
 
+    /// Read and evaluate a source buffer (for `load`), returning the last form's
+    /// value. Uses the same reader setup as the main loop, so top-level
+    /// `(context …)` switches are honoured (ADR-0026).
+    pub fn read_and_eval(&self, src: &[u8]) -> Result<Value, Signal> {
+        let primitives = self.primitive_names();
+        let forms = {
+            let mut interner = self.interner.borrow_mut();
+            let mut reader = crate::reader::Reader::new(src, &mut interner, &primitives);
+            reader.read_all().map_err(Signal::Error)?
+        };
+        let mut result = Value::Nil;
+        for form in &forms {
+            result = self.eval(form)?;
+        }
+        Ok(result)
+    }
+
+    /// Serialise a symbol or whole context to loadable niiLISP source (ADR-0030,
+    /// for `save`/`source`): a context emits `(context 'C)(context MAIN)` then a
+    /// sorted `(set 'C:term value)` per live member, so re-saving an unchanged
+    /// context is byte-identical; a plain symbol emits a single `set`.
+    pub fn source_of(&self, id: SymId) -> String {
+        let name = self.sym_name(id);
+        if !name.contains(':') && matches!(self.lookup(id), Value::Context(_)) {
+            let mut s = format!("(context '{})\n(context MAIN)\n", name);
+            let functor = format!("{}:{}", name, name);
+            for sym in self.interner.borrow().context_symbols(&name) {
+                let val = self.lookup(sym);
+                if matches!(val, Value::Nil) {
+                    continue;
+                }
+                let sn = self.sym_name(sym);
+                if sn == functor {
+                    continue;
+                }
+                s.push_str(&format!("(set '{} {})\n", sn, self.repr(&val)));
+            }
+            s
+        } else {
+            format!("(set '{} {})\n", name, self.repr(&self.lookup(id)))
+        }
+    }
+
     fn current_self(&self) -> Result<Place, Signal> {
         self.self_stack
             .borrow()

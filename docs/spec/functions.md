@@ -210,9 +210,14 @@ are byte-buffer strings, binary-safe on Unix.
 | `(file? path)` / `(directory? path)` | whether `path` exists / is a directory |
 | `(file-info path [i])` | a 10-int list `(size mode device inode links uid gid atime mtime ctime)` (0 where a platform lacks a field), or element `i` |
 | `(env name [value])` | get an environment variable (string/`nil`); with `value` set it (a `nil` value unsets), returning `true` |
+| `(source 'sym…)` | loadable niiLISP source for the symbols/contexts, as a string |
+| `(save path 'sym…)` | write `source` of the symbols to `path`; `true` or `nil` |
+| `(load path)` | read and evaluate a file, returning the last form's value, or `nil` |
 
-`read-buffer` is a special form (its `place` is unevaluated). `save`/`load`/
-`source` (dictionary persistence) are a later slice.
+`read-buffer` is a special form (its `place` is unevaluated). `save`/`source`
+serialise a context deterministically (sorted members), so re-saving an
+unchanged Dictionary is byte-identical — the basis of `qa-dictionary`'s
+round-trip check.
 
 ## FFI (Unix, `ffi` feature)
 

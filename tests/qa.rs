@@ -202,6 +202,33 @@ fn qa_utf8_ext_passes() {
     );
 }
 
+/// Dictionary API (ADR-0030) plus persistence: populate a namespace from an
+/// association list, verify every read, `save` it, `delete` it, `load` it back,
+/// and confirm the two saves are byte-identical. Exercises the nil-functor hash
+/// dispatch, `save`/`load`/`source` (file I/O slice 2), and `randomize`/
+/// `sys-info`. Runs in a temp dir because the oracle writes `Lex.lsp`.
+#[test]
+fn qa_dictionary_passes() {
+    let bin = env!("CARGO_BIN_EXE_niilisp");
+    let script = std::fs::canonicalize("references/newlisp/qa-specific-tests/qa-dictionary")
+        .expect("locate qa-dictionary");
+    let dir = std::env::temp_dir().join(format!("niilisp-qa-dict-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("create temp dir");
+    let output = Command::new(bin)
+        .arg(&script)
+        .arg("300") // a small N keeps the benchmark quick
+        .current_dir(&dir)
+        .output()
+        .expect("launch niilisp");
+    let _ = std::fs::remove_dir_all(&dir);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("Dictionary API tested SUCCESSFUL"),
+        "qa-dictionary did not pass:\n{}",
+        stdout
+    );
+}
+
 #[test]
 fn qa_foop_passes() {
     let stdout = run_qa("qa-foop");
