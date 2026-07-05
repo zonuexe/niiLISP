@@ -76,6 +76,10 @@ _Avoid_: "method call", "message send"
 A niiLISP string is a **binary-safe sequence of bytes** (may hold arbitrary/invalid-UTF-8 bytes), not a guaranteed-UTF-8 text value. It doubles as the byte buffer for I/O and FFI. `length` counts bytes; `utf8len` counts characters. Character-oriented operations decode UTF-8 on demand over this byte storage.
 _Avoid_: "text", "UTF-8 string" (misleading — storage is bytes, not validated UTF-8)
 
+**File handle**:
+An opaque integer returned by `open`, naming an open file in an interpreter-side registry (ADR-0029). It is a plain `Value::Int`, not a distinct value type — newLISP handles are integers and scripts pass and compare them as such. `0`/`1`/`2` are reserved for stdin/stdout/stderr; other numbers are registry slots reused from a freelist after `close` (so a stale handle can name a later-opened file, as in newLISP). Distinct from an **address (FFI)**, which is a real memory address of a value's buffer.
+_Avoid_: "file descriptor" (it is not the OS fd), "stream", "pointer"
+
 **Cilk API (`spawn`/`sync`)**:
 newLISP's high-level parallelism: `spawn` evaluates an expression in a child process, binding its result to a variable later; `sync` waits for spawned children and collects results. Built on `fork`. niiLISP reproduces it on real OS processes.
 _Avoid_: "threads", "async tasks", "futures"
