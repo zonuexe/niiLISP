@@ -15,8 +15,11 @@ what is deliberately deferred, so work can resume without re-deriving context.
   (`struct`/`pack`/`unpack`/`get-*`/`address`, ADR-0021); `case`/`if-not`
   promoted to full special forms; a language spec under [`docs/spec/`](spec/)
   (syntax, types, special-forms, functions).
-- Tests: 36 unit + 5 integration (`qa-exception`, `qa-foop`, `qa-nullstring`,
+- Tests: 40 unit + 5 integration (`qa-exception`, `qa-foop`, `qa-nullstring`,
   and two hermetic `ffi` tests).
+- Standard-library fill-ins (byte-based, no UTF-8 dependency): string builtins
+  `upper-case`/`lower-case`/`trim`/`slice`/`find` and the `dostring` special
+  form — part of the `qa-ref` tail.
 
 ## Next task — pick up here: FFI follow-ups, then bigint
 
@@ -67,9 +70,9 @@ Ordered roughly by dependency. See the corrected acceptance strategy in
 [ADR-0009](adr/0009-v1-acceptance-corpus.md): the `qa-specific-tests` are
 integration targets unlocked as their dependencies land.
 
-- **qa-ref tail** — remaining reference-model features: context-as-hash,
-  string-byte places (`(setf (s 3) "D")`), `eval`/loop place-returns,
-  `upper-case`, `dostring`.
+- **qa-ref tail** — `upper-case`/`lower-case`/`trim`/`slice`/`find` and
+  `dostring` are **done**. Remaining reference-model features: context-as-hash,
+  string-byte places (`(setf (s 3) "D")`), and `eval`/loop place-returns.
 - **`import` / FFI** (v2 headline, [ADR-0015](adr/0015-import-ffi.md)) — **done**:
   typed `import` ([ADR-0019](adr/0019-ffi-first-slice.md)), `callback`
   ([ADR-0020](adr/0020-ffi-callback-slice.md)), and the memory API

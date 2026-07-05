@@ -94,6 +94,11 @@ pub fn install(interp: &Interp) {
     reg("new", b_new);
     reg("starts-with", b_starts_with);
     reg("ends-with", b_ends_with);
+    reg("upper-case", b_upper_case);
+    reg("lower-case", b_lower_case);
+    reg("trim", b_trim);
+    reg("slice", b_slice);
+    reg("find", b_find);
     reg("set-locale", |_, _| Ok(Value::Str(b"C".to_vec())));
     reg("print", b_print);
     reg("println", b_println);
@@ -959,6 +964,139 @@ fn b_ends_with(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
     match (args.first(), args.get(1)) {
         (Some(Value::Str(s)), Some(Value::Str(p))) => Ok(boolean(s.ends_with(p.as_slice()))),
         _ => Ok(Value::Nil),
+    }
+}
+
+/// `(upper-case str)` / `(lower-case str)` — ASCII case conversion, byte by
+/// byte; bytes >= 0x80 are left unchanged (full UTF-8 case folding is deferred,
+/// ADR-0013). Returns a new string.
+fn ascii_case(args: &[Value], upper: bool) -> Result<Value, Signal> {
+    match args.first() {
+        Some(Value::Str(b)) => Ok(Value::Str(
+            b.iter()
+                .map(|&c| {
+                    if upper {
+                        c.to_ascii_uppercase()
+                    } else {
+                        c.to_ascii_lowercase()
+                    }
+                })
+                .collect(),
+        )),
+        _ => Err(Signal::error("upper-case/lower-case: expected a string")),
+    }
+}
+
+fn b_upper_case(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    ascii_case(args, true)
+}
+
+fn b_lower_case(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    ascii_case(args, false)
+}
+
+/// `(trim str)` — strip leading/trailing spaces; `(trim str ch)` — strip `ch`
+/// from both ends; `(trim str l r)` — strip `l` from the left, `r` from the
+/// right. Trim characters are single-byte (ADR-0013). Returns a new string.
+fn b_trim(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    let s = match args.first() {
+        Some(Value::Str(b)) => b,
+        _ => return Err(Signal::error("trim: expected a string")),
+    };
+    let first_byte = |v: &Value| -> Result<u8, Signal> {
+        match v {
+            Value::Str(b) if !b.is_empty() => Ok(b[0]),
+            _ => Err(Signal::error("trim: expected a single-character string")),
+        }
+    };
+    let (lc, rc) = match (args.get(1), args.get(2)) {
+        (None, _) => (b' ', b' '),
+        (Some(c), None) => {
+            let x = first_byte(c)?;
+            (x, x)
+        }
+        (Some(l), Some(r)) => (first_byte(l)?, first_byte(r)?),
+    };
+    let start = s.iter().position(|&b| b != lc).unwrap_or(s.len());
+    let end = s
+        .iter()
+        .rposition(|&b| b != rc)
+        .map_or(start, |i| (i + 1).max(start));
+    Ok(Value::Str(s[start..end].to_vec()))
+}
+
+/// Resolve `(start, end)` byte/element indices for `slice` (newLISP semantics):
+/// a negative `start` counts from the end; a negative `length` leaves that many
+/// elements off the end; an omitted `length` runs to the end.
+fn slice_bounds(len: i64, start: i64, length: Option<i64>) -> (usize, usize) {
+    let s = if start < 0 {
+        (len + start).max(0)
+    } else {
+        start.min(len)
+    };
+    let e = match length {
+        None => len,
+        Some(l) if l >= 0 => (s + l).min(len),
+        Some(l) => len + l, // negative: counted from the end
+    };
+    let e = e.clamp(s, len);
+    (s as usize, e as usize)
+}
+
+/// `(slice seq start [length])` — a copied sub-range of a string (bytes) or list.
+fn b_slice(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    let seq = args
+        .first()
+        .ok_or_else(|| Signal::error("slice: missing sequence"))?;
+    let start = to_i64(
+        args.get(1)
+            .ok_or_else(|| Signal::error("slice: missing start"))?,
+    )?;
+    let length = match args.get(2) {
+        Some(v) => Some(to_i64(v)?),
+        None => None,
+    };
+    match seq {
+        Value::Str(b) => {
+            let (s, e) = slice_bounds(b.len() as i64, start, length);
+            Ok(Value::Str(b[s..e].to_vec()))
+        }
+        Value::List(l) => {
+            let (s, e) = slice_bounds(l.len() as i64, start, length);
+            Ok(Value::List(l[s..e].to_vec()))
+        }
+        Value::Nil => Ok(Value::Nil),
+        _ => Err(Signal::error("slice: expected a string or list")),
+    }
+}
+
+/// `(find key seq)` — index of `key` in `seq`, else `nil`. For strings, `key` is
+/// a substring and the result is a byte offset (ADR-0013); for lists, `key` is
+/// an element compared structurally.
+fn b_find(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    let key = args
+        .first()
+        .ok_or_else(|| Signal::error("find: missing key"))?;
+    let seq = args
+        .get(1)
+        .ok_or_else(|| Signal::error("find: missing sequence"))?;
+    match (key, seq) {
+        (Value::Str(k), Value::Str(s)) => {
+            if k.is_empty() {
+                return Ok(Value::Int(0));
+            }
+            match s.windows(k.len()).position(|w| w == k.as_slice()) {
+                Some(i) => Ok(Value::Int(i as i64)),
+                None => Ok(Value::Nil),
+            }
+        }
+        (_, Value::List(l)) => match l.iter().position(|x| values_equal(x, key)) {
+            Some(i) => Ok(Value::Int(i as i64)),
+            None => Ok(Value::Nil),
+        },
+        _ => Err(Signal::error(
+            "find: expected a string in a string, or an item in a list",
+        )),
     }
 }
 

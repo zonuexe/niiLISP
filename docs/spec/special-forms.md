@@ -267,6 +267,16 @@ loop is integer-valued, otherwise float-valued.
 Binds `var` to each element of `list`. If a `break` expression is given and
 evaluates truthy for the current element, the loop stops before running `body`.
 
+### `dostring` — iterate a string
+
+```
+(dostring (var str [break]) body)
+```
+
+Binds `var` to each byte of `str` as an integer (0–255) — characters are bytes
+in the current model (ADR-0013). Like `dolist`, a truthy `break` expression
+stops the loop before running `body` for that byte.
+
 ### `dotimes` — count
 
 ```

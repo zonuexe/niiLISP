@@ -104,7 +104,16 @@ List construction semantics (array-backed values, no dotted pairs) are in
 | --- | --- |
 | `(string x…)` | concatenate arguments to a string |
 | `(starts-with s prefix)` `(ends-with s suffix)` | prefix / suffix test |
+| `(upper-case s)` `(lower-case s)` | ASCII case conversion (bytes ≥ 0x80 unchanged) |
+| `(trim s [l [r]])` | strip a char (default space) from both ends, or `l`/`r` per side |
+| `(slice seq start [len])` | copied sub-range of a string or list (see below) |
+| `(find key seq)` | index of a substring / list element, else `nil` |
 | `(format fmt arg…)` | printf-style: flags, width, `.precision`; `d i u f e g x X o s c` |
+
+`slice` and `find` index strings by **byte** (ADR-0013). In `slice`, a negative
+`start` counts from the end and a negative `len` drops that many trailing
+elements; out-of-range bounds clamp. `find` on a list compares elements
+structurally (`=`).
 
 ## Evaluation, objects, system
 

@@ -417,6 +417,7 @@ impl Interp {
             "dotimes" => self.sf_dotimes(args),
             "for" => self.sf_for(args),
             "dolist" => self.sf_dolist(args),
+            "dostring" => self.sf_dostring(args),
             "local" => self.sf_local(args),
             "++" | "inc" => self.sf_incr(args, 1),
             "--" | "dec" => self.sf_incr(args, -1),
@@ -720,6 +721,45 @@ impl Interp {
         let mut result = Value::Nil;
         for item in items {
             self.set_global(var, item);
+            if let Some(cond) = break_cond {
+                if self.eval(cond)?.is_truthy() {
+                    break;
+                }
+            }
+            result = self.eval_body(&args[1..])?;
+        }
+        Ok(result)
+    }
+
+    fn sf_dostring(&self, args: &[Value]) -> Result<Value, Signal> {
+        // (dostring (var str [break-cond]) body...) — var := each byte value.
+        // Characters are bytes in the current model (ADR-0013); the loop var
+        // holds the integer value of each byte, as newLISP binds the char number.
+        let spec = match args.first() {
+            Some(Value::List(s)) if s.len() >= 2 => s,
+            _ => return Err(Signal::error("dostring: expected (var string)")),
+        };
+        let var = match &spec[0] {
+            Value::Symbol(id) => *id,
+            _ => return Err(Signal::error("dostring: expected a loop variable")),
+        };
+        let bytes = match self.eval(&spec[1])? {
+            Value::Str(b) => b,
+            Value::Nil => Vec::new(),
+            other => {
+                return Err(Signal::Error(format!(
+                    "dostring: expected a string, got {}",
+                    self.repr(&other)
+                )))
+            }
+        };
+        let break_cond = spec.get(2);
+
+        let mut scope = Scope::new(self);
+        scope.bind(var, Value::Nil);
+        let mut result = Value::Nil;
+        for byte in bytes {
+            self.set_global(var, Value::Int(i64::from(byte)));
             if let Some(cond) = break_cond {
                 if self.eval(cond)?.is_truthy() {
                     break;
@@ -1986,5 +2026,52 @@ mod tests {
         // "abc" is 3 bytes; a 2-byte UTF-8 char makes the byte length 4 (ADR-0013).
         assert_eq!(as_int(run("(length \"abc\")")), 3);
         assert_eq!(as_int(run("(length \"a\\195\\169\")")), 3);
+    }
+
+    #[test]
+    fn string_case_and_trim() {
+        assert_eq!(as_str(run("(upper-case \"aB9z\")")), "AB9Z");
+        assert_eq!(as_str(run("(lower-case \"aB9z\")")), "ab9z");
+        assert_eq!(as_str(run("(trim \"  hi  \")")), "hi");
+        assert_eq!(as_str(run("(trim \"--hi--\" \"-\")")), "hi");
+        assert_eq!(as_str(run("(trim \"xxhiyy\" \"x\" \"y\")")), "hi");
+        // Trimming everything yields the empty string, not an underflow.
+        assert_eq!(as_str(run("(trim \"    \")")), "");
+    }
+
+    #[test]
+    fn slice_strings_and_lists() {
+        assert_eq!(as_str(run("(slice \"hello world\" 6)")), "world");
+        assert_eq!(as_str(run("(slice \"hello world\" 0 5)")), "hello");
+        assert_eq!(as_str(run("(slice \"hello world\" -5)")), "world");
+        // A negative length drops that many bytes from the end.
+        assert_eq!(as_str(run("(slice \"hello world\" 0 -6)")), "hello");
+        // Out-of-range bounds clamp rather than panic.
+        assert_eq!(as_str(run("(slice \"hi\" 5)")), "");
+        assert!(is_true("(= (slice '(1 2 3 4 5) 1 3) '(2 3 4))"));
+    }
+
+    #[test]
+    fn find_in_strings_and_lists() {
+        assert_eq!(as_int(run("(find \"wor\" \"hello world\")")), 6);
+        assert!(matches!(run("(find \"z\" \"hello\")"), Value::Nil));
+        assert_eq!(as_int(run("(find 3 '(1 2 3 4))")), 2);
+        assert!(matches!(run("(find 9 '(1 2 3))"), Value::Nil));
+    }
+
+    #[test]
+    fn dostring_iterates_byte_values() {
+        // Sum of the byte values of "ABC" = 65 + 66 + 67.
+        assert_eq!(
+            as_int(run("(set 'a 0) (dostring (c \"ABC\") (set 'a (+ a c))) a")),
+            198
+        );
+        // The break condition stops before running the body for that byte.
+        assert_eq!(
+            as_int(run(
+                "(set 'n 0) (dostring (c \"hello\" (= c 108)) (set 'n (+ n 1))) n"
+            )),
+            2
+        );
     }
 }
