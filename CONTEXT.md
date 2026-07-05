@@ -65,8 +65,15 @@ newLISP's object style, reproduced by niiLISP: an object is an ordinary list who
 _Avoid_: "class instance", "object type"
 
 **Default functor**:
-The symbol inside a Context that shares the Context's name (`Ctx:Ctx`). Applying a Context as a function invokes it; in FOOP it is the constructor that builds the tagged object list.
+The symbol inside a Context that shares the Context's name (`Ctx:Ctx`). Applying a Context as a function dispatches on it: if it is a **lambda** it is called (in FOOP, the constructor that builds the tagged object list); if it is **nil** the Context behaves as a **Dictionary** (ADR-0030). There is no third "implicit construction" path — FOOP always rides a lambda functor (the predefined `Class`, or a user constructor).
 _Avoid_: "constructor" alone (it is the general "apply a context" hook), "main function"
+
+**Class (predefined)**:
+The FOOP base Context predefined at startup as `(define (Class:Class) (cons (context) (args)))`, mirroring newLISP's built-in. `(new Class 'A)` copies its constructor so `(A …)` builds a tagged object list. Its only role is to give FOOP a lambda **Default functor**, keeping object construction distinct from **Dictionary** access.
+
+**Dictionary (context-as-hash)**:
+A Context whose **Default functor** is nil, used as a string/number-keyed hash (ADR-0030): `(Ctx key val)` sets (a nil value deletes), `(Ctx key)` gets, `(Ctx assoc-list)` bulk-loads, `(Ctx)` returns all pairs sorted. Each key is stored as a context symbol named `_` + the key (mirroring newLISP's `makeSafeSymbol`), so a Dictionary is just a Context of `_`-prefixed symbols and interoperates with `symbols`/`dotree`/`save`. A number key and its string form collapse to one entry (a newLISP quirk).
+_Avoid_: "hash map"/"hash table" (say Dictionary), "association list" (that is the plain list-of-pairs `Ctx` accepts and returns)
 
 **Colon dispatch**:
 The `(:method obj …)` form: `:method` resolves the method at runtime from the class tag at the head of `obj`, giving polymorphism. Distinct from `Ctx:sym`, which names a specific symbol in a specific Context.
