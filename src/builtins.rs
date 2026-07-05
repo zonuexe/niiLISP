@@ -115,6 +115,12 @@ pub fn install(interp: &Interp) {
     reg("ends-with", b_ends_with);
     reg("upper-case", b_upper_case);
     reg("lower-case", b_lower_case);
+    // Regular expressions (ADR-0028), only under the `regex` feature.
+    #[cfg(feature = "regex")]
+    {
+        reg("regex", b_regex);
+        reg("regex-comp", b_regex_comp);
+    }
     reg("trim", b_trim);
     reg("slice", b_slice);
     reg("find", b_find);
@@ -725,6 +731,62 @@ fn b_nth(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
         Value::Str(b) => Ok(str_nth_char(b, idx)),
         _ => Err(Signal::error("nth: expected a list")),
     }
+}
+
+/// `(regex pattern text [option [offset]])` — the first match over the byte
+/// string as `(match byte-off byte-len [subN offN lenN…])`, or `nil` (ADR-0028).
+#[cfg(feature = "regex")]
+fn b_regex(interp: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    let pattern = match args.first() {
+        Some(Value::Str(b)) => String::from_utf8_lossy(b).into_owned(),
+        _ => return Err(Signal::error("regex: pattern must be a string")),
+    };
+    let text = match args.get(1) {
+        Some(Value::Str(b)) => b,
+        _ => return Err(Signal::error("regex: text must be a string")),
+    };
+    let option = match args.get(2) {
+        Some(v) => to_i64(v)?,
+        None => 0,
+    };
+    let offset = match args.get(3) {
+        Some(v) => to_i64(v)?.max(0) as usize,
+        None => 0,
+    };
+    let re = interp.compiled_regex(&pattern, option)?;
+    if offset > text.len() {
+        return Ok(Value::Nil);
+    }
+    match re.captures(&text[offset..]) {
+        None => Ok(Value::Nil),
+        Some(caps) => {
+            // Whole match then each matched subgroup, as (str off len) triples;
+            // offsets are byte positions in the original text.
+            let mut out = Vec::new();
+            for m in caps.iter().flatten() {
+                out.push(Value::str(m.as_bytes().to_vec()));
+                out.push(Value::Int((offset + m.start()) as i64));
+                out.push(Value::Int((m.end() - m.start()) as i64));
+            }
+            Ok(Value::list(out))
+        }
+    }
+}
+
+/// `(regex-comp pattern [option])` — compile and cache the pattern, returning it
+/// on success and erroring on a malformed pattern (ADR-0028).
+#[cfg(feature = "regex")]
+fn b_regex_comp(interp: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    let pattern = match args.first() {
+        Some(Value::Str(b)) => String::from_utf8_lossy(b).into_owned(),
+        _ => return Err(Signal::error("regex-comp: pattern must be a string")),
+    };
+    let option = match args.get(1) {
+        Some(v) => to_i64(v)?,
+        None => 0,
+    };
+    interp.compiled_regex(&pattern, option)?;
+    Ok(args[0].clone())
 }
 
 /// `(args)` — the current lambda/fexpr's arguments not bound to a declared
@@ -1354,32 +1416,46 @@ fn b_ends_with(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
     }
 }
 
-/// `(upper-case str)` / `(lower-case str)` — ASCII case conversion, byte by
-/// byte; bytes >= 0x80 are left unchanged (full UTF-8 case folding is deferred,
-/// ADR-0013). Returns a new string.
-fn ascii_case(args: &[Value], upper: bool) -> Result<Value, Signal> {
-    match args.first() {
-        Some(Value::Str(b)) => Ok(Value::str(
-            b.iter()
-                .map(|&c| {
+/// `(upper-case str)` / `(lower-case str)` — Unicode case folding over the byte
+/// string (ADR-0028): each valid UTF-8 character is mapped with Rust's Unicode
+/// default case mapping (so `ß` -> `SS`, Cyrillic folds, etc.); an invalid
+/// (non-UTF-8) byte passes through unchanged. ASCII is unaffected. New string.
+fn unicode_case(args: &[Value], upper: bool) -> Result<Value, Signal> {
+    let bytes = match args.first() {
+        Some(Value::Str(b)) => b,
+        _ => return Err(Signal::error("upper-case/lower-case: expected a string")),
+    };
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut buf = [0u8; 4];
+    for (s, e) in crate::utf8::char_ranges(bytes) {
+        let chunk = &bytes[s..e];
+        match std::str::from_utf8(chunk) {
+            Ok(valid) => {
+                for c in valid.chars() {
                     if upper {
-                        c.to_ascii_uppercase()
+                        c.to_uppercase().for_each(|u| {
+                            out.extend_from_slice(u.encode_utf8(&mut buf).as_bytes())
+                        });
                     } else {
-                        c.to_ascii_lowercase()
+                        c.to_lowercase().for_each(|l| {
+                            out.extend_from_slice(l.encode_utf8(&mut buf).as_bytes())
+                        });
                     }
-                })
-                .collect(),
-        )),
-        _ => Err(Signal::error("upper-case/lower-case: expected a string")),
+                }
+            }
+            // A lenient one-byte "character" that is not valid UTF-8 (ADR-0025).
+            Err(_) => out.extend_from_slice(chunk),
+        }
     }
+    Ok(Value::str(out))
 }
 
 fn b_upper_case(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
-    ascii_case(args, true)
+    unicode_case(args, true)
 }
 
 fn b_lower_case(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
-    ascii_case(args, false)
+    unicode_case(args, false)
 }
 
 /// `(trim str)` — strip leading/trailing spaces; `(trim str ch)` — strip `ch`

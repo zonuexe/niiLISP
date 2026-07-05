@@ -68,3 +68,13 @@ follow that default rather than a C locale — a documented, minor deviation.
   now see them case-folded.
 - The RE2-vs-PCRE gap is the main compatibility caveat and is recorded in the
   glossary (CONTEXT.md: regular expression).
+
+## Outcome
+
+Implemented as designed: `regex`/`regex-comp` (gated on `feature = "regex"`,
+`regex::bytes` + an `Interp` cache) and Unicode `upper-case`/`lower-case` over the
+ADR-0025 char layer. `qa-utf8-char-regex`, `qa-utf8-special`, and `qa-utf8-compile`
+pass and are wired into `tests/qa.rs` (gated on the feature). The pure
+(`--no-default-features`) build compiles the regex builtins out and its suite
+passes. The three remaining UTF-8-family gaps are `bits` (for `qa-utf8-ext`),
+`$0`/`$1` match variables, and the regex option on `replace`/`find`.

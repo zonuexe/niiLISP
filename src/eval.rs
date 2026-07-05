@@ -108,6 +108,10 @@ pub struct Interp {
     /// Per-call stack of the arguments not bound to a declared parameter, for
     /// `(args)` (ADR-0027).
     args_stack: RefCell<Vec<Vec<Value>>>,
+    /// Compiled regexes keyed by `(pattern, option)`, so `regex`/`regex-comp`
+    /// compile a pattern once (ADR-0028).
+    #[cfg(feature = "regex")]
+    regex_cache: RefCell<HashMap<(String, i64), regex::bytes::Regex>>,
 }
 
 /// Pops the `args` stack when a call returns (including on error unwind),
@@ -221,6 +225,8 @@ impl Interp {
             rng: RefCell::new(default_seed()),
             main_args: RefCell::new(Vec::new()),
             args_stack: RefCell::new(Vec::new()),
+            #[cfg(feature = "regex")]
+            regex_cache: RefCell::new(HashMap::new()),
         };
         builtins::install(&interp);
         crate::ffi::install(&interp);
@@ -639,6 +645,30 @@ impl Interp {
     /// The current call's arguments not bound to a parameter, for `(args)`.
     pub fn current_args(&self) -> Vec<Value> {
         self.args_stack.borrow().last().cloned().unwrap_or_default()
+    }
+
+    /// Compile (and cache) a regex over the byte string, mapping the relevant
+    /// PCRE option bits (ADR-0028). Errors on a malformed pattern.
+    #[cfg(feature = "regex")]
+    pub fn compiled_regex(
+        &self,
+        pattern: &str,
+        option: i64,
+    ) -> Result<regex::bytes::Regex, Signal> {
+        let key = (pattern.to_string(), option);
+        if let Some(re) = self.regex_cache.borrow().get(&key) {
+            return Ok(re.clone());
+        }
+        let mut builder = regex::bytes::RegexBuilder::new(pattern);
+        builder.case_insensitive(option & 1 != 0); // PCRE_CASELESS
+        builder.multi_line(option & 0x2 != 0); // PCRE_MULTILINE
+        builder.dot_matches_new_line(option & 0x4 != 0); // PCRE_DOTALL
+                                                         // 0x800 (PCRE_UTF8) is a no-op: the crate is Unicode by default.
+        let re = builder
+            .build()
+            .map_err(|e| Signal::Error(format!("regex: {}", e)))?;
+        self.regex_cache.borrow_mut().insert(key, re.clone());
+        Ok(re)
     }
 
     // ---- Special forms ---------------------------------------------------
@@ -2660,6 +2690,28 @@ mod tests {
             as_int(run("(context 'E) (set 'n (+ 2 3)) (context MAIN) E:n")),
             5
         );
+    }
+
+    #[cfg(feature = "regex")]
+    #[test]
+    fn regex_and_unicode_case() {
+        // regex returns (match byte-offset byte-length); offsets are bytes.
+        assert!(is_true("(= (regex \"Ω\" \"ΦabcΩdef\") '(\"Ω\" 5 2))"));
+        assert!(is_true(
+            "(= (regex \"[0-9]+\" \"abc123def\") '(\"123\" 3 3))"
+        ));
+        assert!(matches!(run("(regex \"zzz\" \"abc\")"), Value::Nil));
+        // A capture group appends its own (str off len).
+        assert!(is_true(
+            "(= (regex \"a(b+)c\" \"xabbbcy\") '(\"abbbc\" 1 5 \"bbb\" 2 3))"
+        ));
+        // regex-comp returns the pattern on success; a bad pattern errors.
+        assert_eq!(as_str(run("(regex-comp \"a+\")")), "a+");
+        assert!(matches!(run("(catch (regex-comp \"a(\") 'e)"), Value::Nil));
+        // Unicode case folding (Cyrillic); ASCII unchanged.
+        assert_eq!(as_str(run("(upper-case \"абв\")")), "АБВ");
+        assert_eq!(as_str(run("(lower-case (upper-case \"абв\"))")), "абв");
+        assert_eq!(as_str(run("(upper-case \"aB9z\")")), "AB9Z");
     }
 
     #[test]

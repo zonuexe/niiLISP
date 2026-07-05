@@ -23,47 +23,24 @@ what is deliberately deferred, so work can resume without re-deriving context.
   data** (`expand`/`args` + callable lambda-lists, ADR-0027); `case`/`if-not`
   promoted to full special forms; a language spec under [`docs/spec/`](spec/)
   (syntax, types, special-forms, functions).
-- Tests: 61 unit + 9 integration (`qa-exception`, `qa-foop`, `qa-nullstring`,
-  `qa-bigint`, `qa-longnum`, `qa-utf8`, `qa-factorfibo` [`#[ignore]`d — slow
-  sieve], and two hermetic `ffi` tests); the suite passes under both default
-  features and `--no-default-features`.
+- Since v0.2.0 (unreleased, on `master`): **regex** and **Unicode case folding**
+  (ADR-0028) — `regex`/`regex-comp` (pure-Rust `regex` crate, RE2-style, default-on
+  `regex` feature) and Unicode `upper-case`/`lower-case`.
+- Tests: 62 unit + 12 integration (`qa-exception`, `qa-foop`, `qa-nullstring`,
+  `qa-bigint`, `qa-longnum`, `qa-utf8`, `qa-utf8-char-regex`, `qa-utf8-special`,
+  `qa-utf8-compile`, `qa-factorfibo` [`#[ignore]`d — slow sieve], and two hermetic
+  `ffi` tests); the suite passes under both default features and
+  `--no-default-features`.
 - Standard-library fill-ins (byte-based, no UTF-8 dependency): string builtins
   `upper-case`/`lower-case`/`trim`/`slice`/`find`/`explode`/`chop`, the RNG
   (`seed`/`rand`/`random`/`amb`), `main-args`, the list/number builtins
   `min`/`max`/`even?`/`odd?`/`flat`/`join`/`member`/`unique`/`true?`, and the
   `dostring`/`until`/`extend`/`swap` special forms.
 
-## Next task — pick up here: regex + Unicode case folding (ADR-0028)
+## Next task — pick up here: choose the next slice
 
-**Design is done and grilled ([ADR-0028](adr/0028-regex-and-unicode-case.md));
-implement it.** Add `regex`/`regex-comp` (the pure-Rust `regex` crate, RE2-style,
-behind a default-on `regex` feature) and make `upper-case`/`lower-case`
-Unicode-aware. Targets: `qa-utf8-char-regex`, `qa-utf8-special`, `qa-utf8-compile`.
-
-Build order:
-
-1. **Cargo** — a `regex` feature (default-on) with an optional `regex` dependency,
-   mirroring the `bigint` feature.
-2. **A compiled-regex cache** on `Interp` (`RefCell<HashMap<(String, i64),
-   regex::bytes::Regex>>`) built once per `(pattern, option)`. Map PCRE option
-   bits to `RegexBuilder`: `1`→case-insensitive, `0x2`→multi-line, `0x4`→dotall,
-   `0x800`→no-op (Unicode default); ignore the rest.
-3. **`regex`** builtin (`#[cfg(feature = "regex")]`) — `(regex pat text [opt
-   [off]])` over `regex::bytes`; first match → `(match byte-off byte-len [subN
-   offN lenN…])` or `nil`.
-4. **`regex-comp`** builtin — compile+cache, return the pattern string on success,
-   error on a malformed pattern.
-5. **Unicode case** — `upper-case`/`lower-case` decode via the ADR-0025 char layer
-   and map each char with Rust's `to_uppercase`/`to_lowercase`; invalid bytes pass
-   through. ASCII unchanged.
-6. **Tests** — hermetic regex/case unit tests + wire the three `qa-utf8-*` oracles
-   into `tests/qa.rs` (gated on `feature = "regex"`).
-
-**Deferred (ADR-0028):** `$0`/`$1` match variables; regex option on `replace`/
-`find`; PCRE backreferences/lookaround. `qa-utf8-ext` (needs `bits`, no regex) is
-a separate slice.
-
-Then, other candidates:
+The regex + Unicode-case slice is **done** (ADR-0028). Candidates, roughly by
+value:
 
 - **Dictionary API + persistence** — `(Dict key)` / `(Dict assoc)` / `(Dict)`
   over contexts, plus `save`/`load`/`delete`/`sys-info`/`randomize`/file I/O.
@@ -86,6 +63,14 @@ newLISP's; fine for `qa-bigint` (invariant-based) but revisit if a future script
 depends on the exact distribution.
 
 ## Done since v0.1.0
+
+**Regex + Unicode case folding** ([ADR-0028](adr/0028-regex-and-unicode-case.md),
+since v0.2.0): `regex`/`regex-comp` on the pure-Rust `regex` crate (RE2-style, not
+PCRE — no backreferences/lookaround), behind a default-on `regex` feature, with an
+`Interp` compile cache and PCRE-option-bit mapping; `upper-case`/`lower-case` fold
+Unicode via the char layer. `qa-utf8-char-regex`/`qa-utf8-special`/`qa-utf8-compile`
+pass and are wired in. Deferred: `$0`/`$1` vars, regex on `replace`/`find`, PCRE
+features, and `bits` (for `qa-utf8-ext`).
 
 **Lambdas as list data** ([ADR-0027](adr/0027-lambda-as-list-hybrid.md)) — the
 release milestone: run the lambda-calculus gist

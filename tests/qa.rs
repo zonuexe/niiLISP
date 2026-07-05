@@ -123,6 +123,50 @@ fn qa_utf8_passes() {
     );
 }
 
+/// UTF-8 regex (ADR-0028): literal-character `regex` matches with byte offsets,
+/// and character-number round-trips.
+#[cfg(feature = "regex")]
+#[test]
+fn qa_utf8_char_regex_passes() {
+    let stdout = run_qa("qa-utf8-char-regex");
+    assert!(
+        stdout.contains("utf8-char-tests SUCESSFUL")
+            && stdout.contains("utf8-regex-tests SUCESSFUL"),
+        "qa-utf8-char-regex did not pass:\n{}",
+        stdout
+    );
+}
+
+/// `regex-comp` of a UTF-8 pattern, plus Unicode `upper-case`/`lower-case` on
+/// Cyrillic (ADR-0028).
+#[cfg(feature = "regex")]
+#[test]
+fn qa_utf8_special_passes() {
+    let stdout = run_qa("qa-utf8-special");
+    assert!(
+        stdout.contains("UTF-8 compile sucessfull") && !stdout.contains("problem"),
+        "qa-utf8-special regex-comp failed:\n{}",
+        stdout
+    );
+    // Cyrillic case folding round-trips.
+    assert!(
+        stdout.contains("АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ"),
+        "qa-utf8-special upper-case failed:\n{}",
+        stdout
+    );
+}
+
+#[cfg(feature = "regex")]
+#[test]
+fn qa_utf8_compile_passes() {
+    let stdout = run_qa("qa-utf8-compile");
+    assert!(
+        stdout.contains("UTF-8 compile SUCESSFULL"),
+        "qa-utf8-compile did not pass:\n{}",
+        stdout
+    );
+}
+
 #[test]
 fn qa_foop_passes() {
     let stdout = run_qa("qa-foop");

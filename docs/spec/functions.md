@@ -119,12 +119,14 @@ List construction semantics (array-backed values, no dotted pairs) are in
 | --- | --- |
 | `(string x…)` | concatenate arguments to a string |
 | `(starts-with s prefix)` `(ends-with s suffix)` | prefix / suffix test |
-| `(upper-case s)` `(lower-case s)` | ASCII case conversion (bytes ≥ 0x80 unchanged) |
+| `(upper-case s)` `(lower-case s)` | Unicode case folding (invalid bytes unchanged) |
 | `(trim s [l [r]])` | strip a char (default space) from both ends, or `l`/`r` per side |
 | `(slice seq start [len])` | copied sub-range of a string or list (see below) |
 | `(find key seq)` | index of a substring / list element, else `nil` |
 | `(explode seq [n])` | split into `n`-wide pieces (default 1); a string splits by **character** |
 | `(chop seq [n])` | copy without the last `n` bytes/elements (default 1) |
+| `(regex pat text [opt [off]])` | first match `(str byte-off byte-len …captures…)` or `nil` (`regex` feature) |
+| `(regex-comp pat [opt])` | precompile a pattern (cache); returns it, errors if malformed |
 | `(format fmt arg…)` | printf-style: flags, width, `.precision`; `d i u f e g x X o s c` |
 
 `slice` and `find` index strings by **byte** (ADR-0013). In `slice`, a negative
@@ -134,6 +136,9 @@ structurally (`=`). Character-oriented string ops (`nth` / `(str i)` /
 `first` / `rest` / `last` / `explode` / `utf8len`) work on UTF-8 character
 boundaries, while byte-oriented ops (`slice`, the implicit slice `(i str)`,
 `length`, substring search) stay byte-based for binary content (ADR-0025).
+`regex` uses the pure-Rust `regex` crate (RE2-style, not PCRE): classes,
+quantifiers, groups, alternation and anchors work, but **backreferences and
+lookaround do not** (ADR-0028). Matching and offsets are byte-based.
 
 ## Evaluation, objects, system
 

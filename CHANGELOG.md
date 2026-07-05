@@ -6,6 +6,14 @@ All notable changes to niiLISP are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- **Regular expressions** (ADR-0028): `(regex pattern text [option [offset]])` returns the first match over the byte string as `(match byte-offset byte-length …captures…)` or `nil`, and `(regex-comp pattern [option])` precompiles (and caches) a pattern. Uses the pure-Rust `regex` crate (RE2-style) behind a default-on `regex` Cargo feature — so the common regex vocabulary (classes, quantifiers, groups, alternation, anchors) works, but **backreferences and lookaround are not supported** (unlike newLISP's PCRE). PCRE option bits are mapped (case-insensitive, multi-line, dot-all; the UTF-8 bit is a no-op since matching is Unicode by default).
+
+### Changed
+
+- `upper-case`/`lower-case` now perform **Unicode** case folding (ADR-0028), not just ASCII: each valid UTF-8 character is mapped with Unicode default case rules (so Cyrillic, Greek, etc. fold, and `ß` → `SS`), while invalid bytes pass through. ASCII behaviour is unchanged.
+
 ## [0.2.0] - 2026-07-06
 
 ### Added

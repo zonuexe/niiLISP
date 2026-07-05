@@ -90,8 +90,8 @@ UTF-8. Strings double as the byte buffer for I/O and FFI.
   Character-oriented ops (`nth` / `(s i)` indexing / `first` / `rest` / `last` /
   `explode`) work on UTF-8 character boundaries; byte-oriented ops (`slice`, the
   implicit slice `(i s)`, substring search) stay byte-based for binary content
-  (ADR-0025). Case folding (`upper-case`/`lower-case`) is still ASCII-only
-  _(planned: Unicode)_.
+  (ADR-0025). `upper-case`/`lower-case` do Unicode case folding, and `regex`
+  matches over the byte string (ADR-0028).
 - Predicate: `(string? x)`.
 
 ## symbol

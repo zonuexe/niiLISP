@@ -408,10 +408,11 @@ list see [`functions.md`](functions.md).
 - **Predicates**: `nil? null? true? integer? float? number? string? symbol?
   list? array? atom? zero? empty? even? odd? NaN? inf?`.
 - **Strings / sequences**: `string utf8len starts-with ends-with char upper-case
-  lower-case trim slice find explode chop`, `format` (printf subset: flags,
-  width, `.precision`, and `d i u f e g x X o s c`). `utf8len` and
+  lower-case trim slice find explode chop regex regex-comp`, `format` (printf
+  subset: flags, width, `.precision`, and `d i u f e g x X o s c`). `utf8len` and
   `nth`/`first`/`rest`/`last`/`explode` are character-based; `slice`/`length`
-  byte-based (ADR-0025).
+  byte-based (ADR-0025). `upper-case`/`lower-case` do Unicode case folding and
+  `regex` is RE2-style, not PCRE (ADR-0028).
 - **Random**: `seed rand random amb` (a shared seedable generator).
 - **Namespaces**: `context` (switch the current context), `dotree` (iterate a
   context's symbols), `term` (a symbol's unqualified name); see
