@@ -91,3 +91,15 @@ suffice.
   SSO, and — only under an explicit tiny-footprint goal — the uniform-cell
   allocator. The dispatch cache (ADR-0007 / ADR-0017) is a separate, eval-speed
   lever untouched here.
+
+## Outcome
+
+Implemented as one compiler-driven refactor. The full suite (plus new
+aliasing-isolation tests) passed unchanged; `(tak 24 16 8)` stayed at ~0.82s
+(no regression). The clone-on-read O(n²) is gone: a 100,000-element sieve went
+from ~42s to ~0.13s, and `qa-factorfibo`'s 1,000,000-element sieve now runs
+(~1.2s release). `qa-factorfibo` factors correctly and is wired into
+`tests/qa.rs` but `#[ignore]`d — the fixed million-element sieve is ~10s in a
+debug test binary regardless of the Fibonacci count, too slow for the default
+run (`cargo test -- --ignored` exercises it). One unrelated bug surfaced and was
+fixed: `(apply f nil)` treated `nil` as `[nil]` rather than the empty list.

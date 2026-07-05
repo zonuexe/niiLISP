@@ -1,10 +1,12 @@
 //! Core value representation.
 //!
-//! Data values (lists, strings, numbers) are owned and `Clone`d on store/pass,
-//! which realises newLISP's ORO deep-copy semantics (CONTEXT.md: ORO,
-//! ADR-0005). Lists are `Vec`-backed (ADR-0005) and strings are byte buffers
-//! (ADR-0013). Callable code (lambdas, fexprs, builtins) is shared via `Rc` in
-//! this first slice; making live code independently mutable per ORO is a later
+//! Data containers (`List`/`Array`/`Str`) are `Rc`-wrapped and copy-on-write
+//! (ADR-0024): `Clone` on store/pass shares in O(1), and a write clones only if
+//! the value is still shared (`Rc::make_mut`), so the observable semantics are
+//! newLISP's ORO deep-copy (CONTEXT.md: ORO, ADR-0005) with none of the eager
+//! copying. Lists/arrays are `Vec`-backed (ADR-0005) and strings are byte
+//! buffers (ADR-0013). Callable code (lambdas, fexprs, builtins) is shared via
+//! `Rc` too; making live code independently mutable per ORO is a later
 //! refinement tied to the dispatch cache (ADR-0007).
 
 use std::collections::HashMap;
@@ -27,15 +29,17 @@ pub enum Value {
     /// IEEE-754 double.
     Float(f64),
     /// A binary-safe byte buffer (ADR-0013). Not guaranteed valid UTF-8.
-    Str(Vec<u8>),
+    /// Copy-on-write via `Rc` (ADR-0024): shared on store/pass, cloned on write.
+    Str(Rc<Vec<u8>>),
     /// An interned symbol.
     Symbol(SymId),
     /// A `Vec`-backed list (ADR-0005). Also the substrate for FOOP objects.
-    List(Vec<Value>),
+    /// Copy-on-write via `Rc` (ADR-0024).
+    List(Rc<Vec<Value>>),
     /// A fixed-length, list-like value (CONTEXT.md: array, ADR-0023). Backed by
     /// the same `Vec`, but a distinct type: `array?`/`list?` tell them apart and
-    /// it cannot be resized.
-    Array(Vec<Value>),
+    /// it cannot be resized. Copy-on-write via `Rc` (ADR-0024).
+    Array(Rc<Vec<Value>>),
     /// A context (namespace / FOOP class), named by its symbol (CONTEXT.md: Context).
     Context(SymId),
     /// A user function: evaluates its arguments.
@@ -80,6 +84,19 @@ pub struct Builtin {
 }
 
 impl Value {
+    /// Construct a list value, wrapping the elements for copy-on-write (ADR-0024).
+    pub fn list(items: Vec<Value>) -> Value {
+        Value::List(Rc::new(items))
+    }
+    /// Construct an array value (copy-on-write, ADR-0024).
+    pub fn array(items: Vec<Value>) -> Value {
+        Value::Array(Rc::new(items))
+    }
+    /// Construct a string value (copy-on-write, ADR-0024).
+    pub fn str(bytes: Vec<u8>) -> Value {
+        Value::Str(Rc::new(bytes))
+    }
+
     /// newLISP truthiness: only `nil` and an empty list/array are false.
     pub fn is_truthy(&self) -> bool {
         !matches!(self, Value::Nil)

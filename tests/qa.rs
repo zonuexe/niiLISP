@@ -68,6 +68,29 @@ fn qa_bigint_passes() {
     );
 }
 
+/// Factor the first N Fibonacci numbers, using an array-based sieve (ADR-0023)
+/// and bigint. Passes, but its `collect-primes` sieves to 1,000,000, which is
+/// ~1s release / ~10s debug even at N=12 — too slow for the default run, so it
+/// is `#[ignore]`d (run with `cargo test -- --ignored`). Copy-on-write
+/// (ADR-0024) is what makes the sieve feasible at all.
+#[cfg(feature = "bigint")]
+#[test]
+#[ignore = "1,000,000-element sieve is ~10s in debug; run explicitly"]
+fn qa_factorfibo_passes() {
+    let stdout = run_qa_args("qa-factorfibo", &["12"]);
+    assert!(
+        stdout.contains("Total duration:") && !stdout.contains("ERROR"),
+        "qa-factorfibo did not finish cleanly:\n{}",
+        stdout
+    );
+    // Spot-check a known factorization: fibo 11 = 144 = 2^4 * 3^2.
+    assert!(
+        stdout.contains("144 -> (2 2 2 2 3 3)"),
+        "qa-factorfibo factorization looks wrong:\n{}",
+        stdout
+    );
+}
+
 /// A 1000-digit literal squared and divided back, with a per-digit checksum —
 /// bigint parsing/printing plus `explode`/`chop`.
 #[cfg(feature = "bigint")]

@@ -98,7 +98,7 @@ impl ForeignFn {
                 CType::Double => Scalar::F64(to_f64(v)?),
                 CType::CharPtr => {
                     let bytes = match v {
-                        Value::Str(b) => b.clone(),
+                        Value::Str(b) => b.to_vec(),
                         Value::Nil => Vec::new(),
                         _ => return Err(Signal::error("char* argument expects a string")),
                     };
@@ -153,7 +153,7 @@ impl ForeignFn {
                     if p.is_null() {
                         Value::Nil
                     } else {
-                        Value::Str(CStr::from_ptr(p).to_bytes().to_vec())
+                        Value::str(CStr::from_ptr(p).to_bytes().to_vec())
                     }
                 }
                 CType::VoidPtr => {
@@ -299,7 +299,7 @@ unsafe extern "C" fn trampoline(
                 if sp.is_null() {
                     Value::Nil
                 } else {
-                    Value::Str(CStr::from_ptr(sp).to_bytes().to_vec())
+                    Value::str(CStr::from_ptr(sp).to_bytes().to_vec())
                 }
             }
             CType::VoidPtr => Value::Int(*(p as *const *const c_void) as usize as i64),
@@ -398,7 +398,7 @@ fn layout_types(v: &Value) -> Result<Vec<CType>, Signal> {
         _ => return Err(Signal::error("expected a struct (a list of C type names)")),
     };
     let mut types = Vec::with_capacity(items.len());
-    for it in items {
+    for it in items.iter() {
         match it {
             Value::Str(b) => {
                 let ct = parse_type(b)?;
@@ -454,7 +454,7 @@ fn b_struct(interp: &Interp, args: &[Value]) -> Result<Value, Signal> {
             _ => return Err(Signal::error("struct: field types must be strings")),
         }
     }
-    let layout = Value::List(fields);
+    let layout = Value::list(fields);
     interp.set_global(sym, layout.clone());
     Ok(layout)
 }
@@ -654,7 +654,7 @@ fn pack_format(fmt: &[u8], vals: &[Value]) -> Result<Value, Signal> {
             Field::Pad(n) => out.resize(out.len() + n, 0),
         }
     }
-    Ok(Value::Str(out))
+    Ok(Value::str(out))
 }
 
 /// `unpack` for the format-string path.
@@ -701,13 +701,13 @@ fn unpack_format(fmt: &[u8], data: &[u8]) -> Result<Value, Signal> {
                 let bits = u64::from_le_bytes(le.try_into().unwrap());
                 out.push(Value::Float(f64::from_bits(bits)));
             }
-            Field::Str(n) => out.push(Value::Str(take(&mut off, *n)?)),
+            Field::Str(n) => out.push(Value::str(take(&mut off, *n)?)),
             Field::Pad(n) => {
                 take(&mut off, *n)?;
             }
         }
     }
-    Ok(Value::List(out))
+    Ok(Value::list(out))
 }
 
 /// `(pack layout val…)` — serialise `val…` to a binary string. `layout` is
@@ -756,7 +756,7 @@ fn pack_struct(layout: &Value, vals: &[Value]) -> Result<Value, Signal> {
             CType::Void => unreachable!("layout_types rejects void"),
         }
     }
-    Ok(Value::Str(buf))
+    Ok(Value::str(buf))
 }
 
 /// `(unpack layout str)` — the inverse of `pack`. `layout` is a struct or a
@@ -820,13 +820,13 @@ fn unpack_struct(layout: &Value, bytes: &[u8]) -> Result<Value, Signal> {
                 // SAFETY: caller-supplied address; a non-NULL invalid pointer is
                 // UB, the caller's risk (ADR-0015). NULL is handled above.
                 let s = unsafe { CStr::from_ptr(addr as *const c_char).to_bytes().to_vec() };
-                Value::Str(s)
+                Value::str(s)
             }
             CType::Void => unreachable!("layout_types rejects void"),
         };
         out.push(v);
     }
-    Ok(Value::List(out))
+    Ok(Value::list(out))
 }
 
 /// The integer address argument to a `get-*` builtin, rejecting NULL (0).
@@ -871,7 +871,7 @@ fn b_get_string(_interp: &Interp, args: &[Value]) -> Result<Value, Signal> {
             }
         }
     };
-    Ok(Value::Str(bytes))
+    Ok(Value::str(bytes))
 }
 
 /// Read a fixed-width C scalar at an integer address (NULL rejected).
@@ -963,7 +963,7 @@ mod tests {
 
     fn bytes(v: Value) -> Vec<u8> {
         match v {
-            Value::Str(b) => b,
+            Value::Str(b) => b.to_vec(),
             _ => panic!("expected a string"),
         }
     }
@@ -971,9 +971,9 @@ mod tests {
     fn ints(v: Value) -> Vec<i64> {
         match v {
             Value::List(items) => items
-                .into_iter()
+                .iter()
                 .map(|x| match x {
-                    Value::Int(n) => n,
+                    Value::Int(n) => *n,
                     _ => panic!("expected an int field"),
                 })
                 .collect(),
@@ -1031,13 +1031,13 @@ mod tests {
         // `s5` null-pads; `n2` writes two nulls and consumes no value.
         let packed = bytes(ok(pack_format(
             b"s5 n2 c",
-            &[Value::Str(b"hi".to_vec()), Value::Int(66)],
+            &[Value::str(b"hi".to_vec()), Value::Int(66)],
         )));
         assert_eq!(packed, vec![b'h', b'i', 0, 0, 0, 0, 0, 66]);
         match ok(unpack_format(b"s5 n2 c", &packed)) {
             Value::List(items) => {
                 assert_eq!(items.len(), 2, "pad consumes no value");
-                assert!(matches!(&items[0], Value::Str(s) if s == b"hi\0\0\0"));
+                assert!(matches!(&items[0], Value::Str(s) if s.as_slice() == b"hi\0\0\0"));
                 assert!(matches!(items[1], Value::Int(66)));
             }
             _ => panic!("expected a list"),

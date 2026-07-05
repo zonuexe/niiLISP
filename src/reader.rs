@@ -78,7 +78,7 @@ impl<'a> Reader<'a> {
                 self.pos += 1;
                 let quoted = self.read_form()?;
                 let q = self.interner.intern("quote");
-                Ok(Value::List(vec![Value::Symbol(q), quoted]))
+                Ok(Value::list(vec![Value::Symbol(q), quoted]))
             }
             Some(b'"') => self.read_dquote_string(),
             Some(b'{') => self.read_brace_string(),
@@ -96,7 +96,7 @@ impl<'a> Reader<'a> {
                 None => return Err("unterminated list: missing ')'".to_string()),
                 Some(b')') => {
                     self.pos += 1;
-                    return Ok(Value::List(items));
+                    return Ok(Value::list(items));
                 }
                 Some(_) => items.push(self.read_form()?),
             }
@@ -108,7 +108,7 @@ impl<'a> Reader<'a> {
         let mut bytes = Vec::new();
         while let Some(b) = self.bump() {
             match b {
-                b'"' => return Ok(Value::Str(bytes)),
+                b'"' => return Ok(Value::str(bytes)),
                 b'\\' => {
                     let e = self.bump().ok_or("unterminated string escape")?;
                     match e {
@@ -154,7 +154,7 @@ impl<'a> Reader<'a> {
                 b'}' => {
                     depth -= 1;
                     if depth == 0 {
-                        return Ok(Value::Str(bytes));
+                        return Ok(Value::str(bytes));
                     }
                     bytes.push(b);
                 }
@@ -175,7 +175,7 @@ impl<'a> Reader<'a> {
                 Some(end) => {
                     let bytes = rest[..end].to_vec();
                     self.pos += end + CLOSE.len();
-                    Ok(Value::Str(bytes))
+                    Ok(Value::str(bytes))
                 }
                 None => Err("unterminated tag string: missing [/text]".to_string()),
             }

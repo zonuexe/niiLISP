@@ -366,7 +366,7 @@ impl Interp {
         for e in arg_exprs {
             obj.push(self.eval(e)?);
         }
-        Ok(Value::List(obj))
+        Ok(Value::list(obj))
     }
 
     fn current_self(&self) -> Result<Place, Signal> {
@@ -700,13 +700,14 @@ impl Interp {
             // An unset place adopts a string if every addition is a string.
             if matches!(loc, Value::Nil) {
                 *loc = if additions.iter().all(|a| matches!(a, Value::Str(_))) {
-                    Value::Str(Vec::new())
+                    Value::str(Vec::new())
                 } else {
-                    Value::List(Vec::new())
+                    Value::list(Vec::new())
                 };
             }
             match loc {
                 Value::Str(buf) => {
+                    let buf = Rc::make_mut(buf);
                     for a in &additions {
                         match a {
                             Value::Str(b) => buf.extend_from_slice(b),
@@ -719,6 +720,7 @@ impl Interp {
                     }
                 }
                 Value::List(list) => {
+                    let list = Rc::make_mut(list);
                     for a in &additions {
                         match a {
                             Value::List(items) => list.extend(items.iter().cloned()),
@@ -874,9 +876,11 @@ impl Interp {
             Value::Symbol(id) => *id,
             _ => return Err(Signal::error("dolist: expected a loop variable")),
         };
+        // Keep the list shared (Rc) and iterate by reference — no full copy
+        // (copy-on-write, ADR-0024); only each loop-var binding is cloned.
         let items = match self.eval(&spec[1])? {
             Value::List(l) => l,
-            Value::Nil => Vec::new(),
+            Value::Nil => Rc::new(Vec::new()),
             other => {
                 return Err(Signal::Error(format!(
                     "dolist: expected a list, got {}",
@@ -889,8 +893,8 @@ impl Interp {
         let mut scope = Scope::new(self);
         scope.bind(var, Value::Nil);
         let mut result = Value::Nil;
-        for item in items {
-            self.set_global(var, item);
+        for item in items.iter() {
+            self.set_global(var, item.clone());
             if let Some(cond) = break_cond {
                 if self.eval(cond)?.is_truthy() {
                     break;
@@ -915,7 +919,7 @@ impl Interp {
         };
         let bytes = match self.eval(&spec[1])? {
             Value::Str(b) => b,
-            Value::Nil => Vec::new(),
+            Value::Nil => Rc::new(Vec::new()),
             other => {
                 return Err(Signal::Error(format!(
                     "dostring: expected a string, got {}",
@@ -928,7 +932,7 @@ impl Interp {
         let mut scope = Scope::new(self);
         scope.bind(var, Value::Nil);
         let mut result = Value::Nil;
-        for byte in bytes {
+        for &byte in bytes.iter() {
             self.set_global(var, Value::Int(i64::from(byte)));
             if let Some(cond) = break_cond {
                 if self.eval(cond)?.is_truthy() {
@@ -947,7 +951,7 @@ impl Interp {
             _ => return Err(Signal::error("local: expected a symbol list")),
         };
         let mut scope = Scope::new(self);
-        for s in syms {
+        for s in syms.iter() {
             match s {
                 Value::Symbol(id) => scope.bind(*id, Value::Nil),
                 _ => return Err(Signal::error("local: expected a symbol")),
@@ -972,11 +976,11 @@ impl Interp {
         };
         self.with_place_mut(&place, move |loc| {
             let list = match loc {
-                Value::List(l) => l,
+                Value::List(l) => Rc::make_mut(l),
                 Value::Nil => {
-                    *loc = Value::List(Vec::new());
+                    *loc = Value::list(Vec::new());
                     match loc {
-                        Value::List(l) => l,
+                        Value::List(l) => Rc::make_mut(l),
                         _ => unreachable!(),
                     }
                 }
@@ -1029,7 +1033,7 @@ impl Interp {
         };
         self.with_place_mut(&place, move |loc| {
             let list = match loc {
-                Value::List(l) => l,
+                Value::List(l) => Rc::make_mut(l),
                 _ => return Err(Signal::error("pop: place is not a list")),
             };
             if list.is_empty() {
@@ -1067,8 +1071,8 @@ impl Interp {
             .first()
             .ok_or_else(|| Signal::error("reverse: missing argument"))?;
         self.place_or_value(target, |loc| match loc {
-            Value::List(l) => l.reverse(),
-            Value::Str(b) => b.reverse(),
+            Value::List(l) => Rc::make_mut(l).reverse(),
+            Value::Str(b) => Rc::make_mut(b).reverse(),
             _ => {}
         })
     }
@@ -1091,14 +1095,14 @@ impl Interp {
         match self.resolve_place(target) {
             Ok(place) => self.with_place_mut(&place, |loc| {
                 if let Value::List(l) = loc {
-                    l.sort_by(|a, b| self.value_cmp(a, b));
+                    Rc::make_mut(l).sort_by(|a, b| self.value_cmp(a, b));
                 }
                 Ok(loc.clone())
             }),
             Err(_) => {
                 let mut v = self.eval(target)?;
                 if let Value::List(l) = &mut v {
-                    l.sort_by(|a, b| self.value_cmp(a, b));
+                    Rc::make_mut(l).sort_by(|a, b| self.value_cmp(a, b));
                 }
                 Ok(v)
             }
@@ -1653,7 +1657,7 @@ impl Interp {
                         Ok(Value::Nil)
                     }
                     Err(Signal::Error(msg)) => {
-                        self.set_global(sym, Value::Str(msg.into_bytes()));
+                        self.set_global(sym, Value::str(msg.into_bytes()));
                         Ok(Value::Nil)
                     }
                 }
@@ -1662,7 +1666,7 @@ impl Interp {
             None => match result {
                 Ok(v) => Ok(v),
                 Err(Signal::Throw(v)) => Ok(v),
-                Err(Signal::Error(msg)) => Ok(Value::Str(msg.into_bytes())),
+                Err(Signal::Error(msg)) => Ok(Value::str(msg.into_bytes())),
             },
         }
     }
@@ -1736,7 +1740,9 @@ fn place_navigate<'a>(root: &'a mut Value, path: &[i64]) -> Option<&'a mut Value
                 if i < 0 || i as usize >= l.len() {
                     return None;
                 }
-                cur = &mut l[i as usize];
+                // make_mut clones the shared container so the write stays isolated
+                // (copy-on-write, ADR-0024).
+                cur = &mut Rc::make_mut(l)[i as usize];
             }
             _ => return None,
         }
@@ -1750,12 +1756,12 @@ fn rotate_value(v: &mut Value, n: i64) {
         Value::List(l) if !l.is_empty() => {
             let len = l.len() as i64;
             let k = (((n % len) + len) % len) as usize;
-            l.rotate_right(k);
+            Rc::make_mut(l).rotate_right(k);
         }
         Value::Str(b) if !b.is_empty() => {
             let len = b.len() as i64;
             let k = (((n % len) + len) % len) as usize;
-            b.rotate_right(k);
+            Rc::make_mut(b).rotate_right(k);
         }
         _ => {}
     }
@@ -1765,7 +1771,7 @@ fn rotate_value(v: &mut Value, n: i64) {
 fn do_replace(loc: &mut Value, target: &Value, newval: &Value) {
     match loc {
         Value::List(l) => {
-            for e in l.iter_mut() {
+            for e in Rc::make_mut(l).iter_mut() {
                 if crate::builtins::values_equal(e, target) {
                     *e = newval.clone();
                 }
@@ -1773,7 +1779,7 @@ fn do_replace(loc: &mut Value, target: &Value, newval: &Value) {
         }
         Value::Str(b) => {
             if let (Value::Str(t), Value::Str(n)) = (target, newval) {
-                *b = replace_bytes(b, t, n);
+                *b = Rc::new(replace_bytes(b, t, n));
             }
         }
         _ => {}
@@ -1784,7 +1790,7 @@ fn do_replace(loc: &mut Value, target: &Value, newval: &Value) {
 /// `all == false`, stops after the first replacement. Returns whether it did.
 fn deep_replace(v: &mut Value, key: &Value, new: &Value, all: bool) -> bool {
     if let Value::List(l) = v {
-        for e in l.iter_mut() {
+        for e in Rc::make_mut(l).iter_mut() {
             if crate::builtins::values_equal(e, key) {
                 *e = new.clone();
                 if !all {
@@ -1846,7 +1852,7 @@ fn index_one(i: i64, target: &Value) -> Value {
             if idx < 0 || idx as usize >= b.len() {
                 Value::Nil
             } else {
-                Value::Str(vec![b[idx as usize]])
+                Value::str(vec![b[idx as usize]])
             }
         }
         _ => Value::Nil,
@@ -1874,11 +1880,11 @@ fn slice_seq(start: i64, len: Option<i64>, target: &Value) -> Value {
     match target {
         Value::List(l) | Value::Array(l) => {
             let (s, e) = bounds(l.len(), start, len);
-            Value::List(l[s..e].to_vec())
+            Value::list(l[s..e].to_vec())
         }
         Value::Str(b) => {
             let (s, e) = bounds(b.len(), start, len);
-            Value::Str(b[s..e].to_vec())
+            Value::str(b[s..e].to_vec())
         }
         _ => Value::Nil,
     }
@@ -2328,6 +2334,30 @@ mod tests {
             "(set 'x 100000000000000000000L) (++ x 5) (= x 100000000000000000005L)"
         ));
         assert!(is_true("(set 'x 5L) (-- x 2L) (= x 3L)"));
+    }
+
+    #[test]
+    fn cow_preserves_value_isolation() {
+        // Copy-on-write (ADR-0024) must be observationally identical to ORO
+        // deep-copy: a shared value, mutated through one owner, leaves the other
+        // unchanged.
+        assert!(is_true(
+            "(set 'a '(1 2 3)) (set 'b a) (push 9 a) (and (= a '(9 1 2 3)) (= b '(1 2 3)))"
+        ));
+        // Nested: setf into a shared sublist clones only that owner's path.
+        assert!(is_true(
+            "(set 'c '((1 2) 3)) (set 'd c) (setf (c 0 1) 99) \
+             (and (= c '((1 99) 3)) (= d '((1 2) 3)))"
+        ));
+        // Strings share and copy on write too (via a place mutation).
+        assert!(is_true(
+            "(set 's \"abc\") (set 't s) (reverse s) (and (= s \"cba\") (= t \"abc\"))"
+        ));
+        // A function argument is an independent copy: mutating the parameter's
+        // list does not reach the caller's binding.
+        assert!(is_true(
+            "(define (f x) (push 0 x) x) (set 'g '(1 2)) (f g) (= g '(1 2))"
+        ));
     }
 
     #[test]

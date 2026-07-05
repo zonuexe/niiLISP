@@ -129,7 +129,7 @@ pub fn install(interp: &Interp) {
     reg("rand", b_rand);
     reg("random", b_random);
     reg("main-args", b_main_args);
-    reg("set-locale", |_, _| Ok(Value::Str(b"C".to_vec())));
+    reg("set-locale", |_, _| Ok(Value::str(b"C".to_vec())));
     reg("print", b_print);
     reg("println", b_println);
     reg("string", b_string);
@@ -448,7 +448,7 @@ fn b_char(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
             let s = char::from_u32(*n as u32)
                 .map(|c| c.to_string().into_bytes())
                 .unwrap_or_else(|| vec![(*n & 0xff) as u8]);
-            Ok(Value::Str(s))
+            Ok(Value::str(s))
         }
         Some(Value::Str(b)) => match String::from_utf8_lossy(b).chars().next() {
             Some(c) => Ok(Value::Int(c as i64)),
@@ -547,11 +547,11 @@ pub fn values_equal(a: &Value, b: &Value) -> bool {
         // objects (context-headed) match quoted symbol-headed literals.
         (Value::Context(x), Value::Symbol(y)) | (Value::Symbol(y), Value::Context(x)) => x == y,
         (Value::List(x), Value::List(y)) => {
-            x.len() == y.len() && x.iter().zip(y).all(|(p, q)| values_equal(p, q))
+            x.len() == y.len() && x.iter().zip(y.iter()).all(|(p, q)| values_equal(p, q))
         }
         // An array equals an array element-wise, but never a list (ADR-0023).
         (Value::Array(x), Value::Array(y)) => {
-            x.len() == y.len() && x.iter().zip(y).all(|(p, q)| values_equal(p, q))
+            x.len() == y.len() && x.iter().zip(y.iter()).all(|(p, q)| values_equal(p, q))
         }
         _ => false,
     }
@@ -639,7 +639,7 @@ fn ge(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
 // ---- lists ---------------------------------------------------------------
 
 fn b_list(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
-    Ok(Value::List(args.to_vec()))
+    Ok(Value::list(args.to_vec()))
 }
 
 fn b_cons(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
@@ -652,9 +652,9 @@ fn b_cons(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
             let mut out = Vec::with_capacity(tail.len() + 1);
             out.push(args[0].clone());
             out.extend_from_slice(tail);
-            Ok(Value::List(out))
+            Ok(Value::list(out))
         }
-        other => Ok(Value::List(vec![args[0].clone(), other.clone()])),
+        other => Ok(Value::list(vec![args[0].clone(), other.clone()])),
     }
 }
 
@@ -664,15 +664,15 @@ fn b_first(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
             .first()
             .cloned()
             .ok_or_else(|| Signal::error("first: empty list")),
-        Some(Value::Str(b)) if !b.is_empty() => Ok(Value::Str(vec![b[0]])),
+        Some(Value::Str(b)) if !b.is_empty() => Ok(Value::str(vec![b[0]])),
         _ => Err(Signal::error("first: expected a non-empty list or string")),
     }
 }
 
 fn b_rest(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
     match args.first() {
-        Some(Value::List(l)) => Ok(Value::List(l.get(1..).unwrap_or(&[]).to_vec())),
-        Some(Value::Str(b)) => Ok(Value::Str(b.get(1..).unwrap_or(&[]).to_vec())),
+        Some(Value::List(l)) => Ok(Value::list(l.get(1..).unwrap_or(&[]).to_vec())),
+        Some(Value::Str(b)) => Ok(Value::str(b.get(1..).unwrap_or(&[]).to_vec())),
         _ => Err(Signal::error("rest: expected a list or string")),
     }
 }
@@ -727,7 +727,7 @@ fn b_append(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
                 out.extend_from_slice(b);
             }
         }
-        return Ok(Value::Str(out));
+        return Ok(Value::str(out));
     }
     let mut out = Vec::new();
     for a in args {
@@ -741,7 +741,7 @@ fn b_append(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
             }
         }
     }
-    Ok(Value::List(out))
+    Ok(Value::list(out))
 }
 
 // ---- higher-order and sequence ------------------------------------------
@@ -774,7 +774,7 @@ fn b_sequence(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
         });
         v += signed;
     }
-    Ok(Value::List(out))
+    Ok(Value::list(out))
 }
 
 fn b_map(i: &Interp, args: &[Value]) -> Result<Value, Signal> {
@@ -784,12 +784,12 @@ fn b_map(i: &Interp, args: &[Value]) -> Result<Value, Signal> {
     let lists: Vec<&Vec<Value>> = args[1..]
         .iter()
         .map(|v| match v {
-            Value::List(l) => Ok(l),
+            Value::List(l) => Ok(&**l),
             _ => Err(Signal::error("map: expected list arguments")),
         })
         .collect::<Result<_, _>>()?;
     if lists.is_empty() {
-        return Ok(Value::List(Vec::new()));
+        return Ok(Value::list(Vec::new()));
     }
     let n = lists.iter().map(|l| l.len()).min().unwrap_or(0);
     let mut out = Vec::with_capacity(n);
@@ -797,7 +797,7 @@ fn b_map(i: &Interp, args: &[Value]) -> Result<Value, Signal> {
         let call_args: Vec<Value> = lists.iter().map(|l| l[k].clone()).collect();
         out.push(i.call(f, call_args)?);
     }
-    Ok(Value::List(out))
+    Ok(Value::list(out))
 }
 
 fn b_apply(i: &Interp, args: &[Value]) -> Result<Value, Signal> {
@@ -805,9 +805,10 @@ fn b_apply(i: &Interp, args: &[Value]) -> Result<Value, Signal> {
         .first()
         .ok_or_else(|| Signal::error("apply: missing function"))?;
     let call_args = match args.get(1) {
-        Some(Value::List(l)) => l.clone(),
+        Some(Value::List(l)) => l.to_vec(),
+        // `nil` is the empty list: (apply * nil) is the identity, not (* nil).
+        Some(Value::Nil) | None => Vec::new(),
         Some(other) => vec![other.clone()],
-        None => Vec::new(),
     };
     i.call(f, call_args)
 }
@@ -822,12 +823,12 @@ fn b_filter(i: &Interp, args: &[Value]) -> Result<Value, Signal> {
         _ => return Err(Signal::error("filter: expected a list")),
     };
     let mut out = Vec::new();
-    for item in list {
+    for item in list.iter() {
         if i.call(pred, vec![item.clone()])?.is_truthy() {
             out.push(item.clone());
         }
     }
-    Ok(Value::List(out))
+    Ok(Value::list(out))
 }
 
 fn b_dup(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
@@ -836,8 +837,8 @@ fn b_dup(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
         _ => return Err(Signal::error("dup: expected (dup value count)")),
     };
     match args.first() {
-        Some(Value::Str(b)) => Ok(Value::Str(b.repeat(n))),
-        Some(v) => Ok(Value::List(vec![v.clone(); n])),
+        Some(Value::Str(b)) => Ok(Value::str(b.repeat(n))),
+        Some(v) => Ok(Value::list(vec![v.clone(); n])),
         None => Ok(Value::Nil),
     }
 }
@@ -964,7 +965,7 @@ fn b_string(i: &Interp, args: &[Value]) -> Result<Value, Signal> {
             other => out.extend_from_slice(to_display(other, &i.interner.borrow()).as_bytes()),
         }
     }
-    Ok(Value::Str(out))
+    Ok(Value::str(out))
 }
 
 // ---- bitwise -------------------------------------------------------------
@@ -1056,7 +1057,7 @@ fn b_format(i: &Interp, args: &[Value]) -> Result<Value, Signal> {
         argi += 1;
         out.extend_from_slice(format_one(&spec, conv, &arg, i)?.as_bytes());
     }
-    Ok(Value::Str(out))
+    Ok(Value::str(out))
 }
 
 fn format_one(spec: &str, conv: char, arg: &Value, i: &Interp) -> Result<String, Signal> {
@@ -1151,7 +1152,7 @@ fn b_assoc(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
     // (assoc key alist) -> the (key ...) pair, or nil.
     let key = args.first().unwrap_or(&Value::Nil);
     if let Some(Value::List(items)) = args.get(1) {
-        for item in items {
+        for item in items.iter() {
             if let Value::List(pair) = item {
                 if pair.first().is_some_and(|k| values_equal(k, key)) {
                     return Ok(item.clone());
@@ -1170,7 +1171,7 @@ fn b_lookup(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
         _ => -1,
     };
     if let Some(Value::List(items)) = args.get(1) {
-        for item in items {
+        for item in items.iter() {
             if let Value::List(pair) = item {
                 if pair.first().is_some_and(|k| values_equal(k, key)) {
                     let i = if idx < 0 {
@@ -1221,7 +1222,7 @@ fn b_ends_with(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
 /// ADR-0013). Returns a new string.
 fn ascii_case(args: &[Value], upper: bool) -> Result<Value, Signal> {
     match args.first() {
-        Some(Value::Str(b)) => Ok(Value::Str(
+        Some(Value::Str(b)) => Ok(Value::str(
             b.iter()
                 .map(|&c| {
                     if upper {
@@ -1271,7 +1272,7 @@ fn b_trim(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
         .iter()
         .rposition(|&b| b != rc)
         .map_or(start, |i| (i + 1).max(start));
-    Ok(Value::Str(s[start..end].to_vec()))
+    Ok(Value::str(s[start..end].to_vec()))
 }
 
 /// Resolve `(start, end)` byte/element indices for `slice` (newLISP semantics):
@@ -1308,11 +1309,11 @@ fn b_slice(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
     match seq {
         Value::Str(b) => {
             let (s, e) = slice_bounds(b.len() as i64, start, length);
-            Ok(Value::Str(b[s..e].to_vec()))
+            Ok(Value::str(b[s..e].to_vec()))
         }
         Value::List(l) => {
             let (s, e) = slice_bounds(l.len() as i64, start, length);
-            Ok(Value::List(l[s..e].to_vec()))
+            Ok(Value::list(l[s..e].to_vec()))
         }
         Value::Nil => Ok(Value::Nil),
         _ => Err(Signal::error("slice: expected a string or list")),
@@ -1357,8 +1358,8 @@ fn b_chop(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
         None => 1,
     };
     match args.first() {
-        Some(Value::Str(b)) => Ok(Value::Str(b[..b.len().saturating_sub(n)].to_vec())),
-        Some(Value::List(l)) => Ok(Value::List(l[..l.len().saturating_sub(n)].to_vec())),
+        Some(Value::Str(b)) => Ok(Value::str(b[..b.len().saturating_sub(n)].to_vec())),
+        Some(Value::List(l)) => Ok(Value::list(l[..l.len().saturating_sub(n)].to_vec())),
         Some(Value::Nil) | None => Ok(Value::Nil),
         _ => Err(Signal::error("chop: expected a string or list")),
     }
@@ -1372,13 +1373,13 @@ fn b_explode(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
         None => 1,
     };
     match args.first() {
-        Some(Value::Str(b)) => Ok(Value::List(
-            b.chunks(n).map(|c| Value::Str(c.to_vec())).collect(),
+        Some(Value::Str(b)) => Ok(Value::list(
+            b.chunks(n).map(|c| Value::str(c.to_vec())).collect(),
         )),
-        Some(Value::List(l)) => Ok(Value::List(
-            l.chunks(n).map(|c| Value::List(c.to_vec())).collect(),
+        Some(Value::List(l)) => Ok(Value::list(
+            l.chunks(n).map(|c| Value::list(c.to_vec())).collect(),
         )),
-        Some(Value::Nil) | None => Ok(Value::List(Vec::new())),
+        Some(Value::Nil) | None => Ok(Value::list(Vec::new())),
         _ => Err(Signal::error("explode: expected a string or list")),
     }
 }
@@ -1388,16 +1389,16 @@ fn b_explode(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
 fn b_main_args(interp: &Interp, args: &[Value]) -> Result<Value, Signal> {
     let all = interp.main_args();
     match args.first() {
-        None => Ok(Value::List(
+        None => Ok(Value::list(
             all.into_iter()
-                .map(|s| Value::Str(s.into_bytes()))
+                .map(|s| Value::str(s.into_bytes()))
                 .collect(),
         )),
         Some(v) => {
             let i = to_i64(v)?;
             let idx = if i < 0 { all.len() as i64 + i } else { i };
             match usize::try_from(idx).ok().and_then(|k| all.get(k)) {
-                Some(s) => Ok(Value::Str(s.clone().into_bytes())),
+                Some(s) => Ok(Value::str(s.clone().into_bytes())),
                 None => Ok(Value::Nil),
             }
         }
@@ -1421,7 +1422,7 @@ fn b_rand(interp: &Interp, args: &[Value]) -> Result<Value, Signal> {
     match args.get(1) {
         Some(cnt) => {
             let n = to_i64(cnt)?.max(0) as usize;
-            Ok(Value::List((0..n).map(|_| draw(interp)).collect()))
+            Ok(Value::list((0..n).map(|_| draw(interp)).collect()))
         }
         None => Ok(draw(interp)),
     }
@@ -1439,7 +1440,7 @@ fn b_random(interp: &Interp, args: &[Value]) -> Result<Value, Signal> {
         (Some(off), Some(scale), Some(cnt)) => {
             let (o, s) = (to_f64(off)?, to_f64(scale)?);
             let n = to_i64(cnt)?.max(0) as usize;
-            Ok(Value::List(
+            Ok(Value::list(
                 (0..n).map(|_| Value::Float(o + s * uni(interp))).collect(),
             ))
         }
@@ -1508,9 +1509,9 @@ fn b_flat(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
         Some(v @ Value::List(_)) => {
             let mut out = Vec::new();
             go(v, &mut out);
-            Ok(Value::List(out))
+            Ok(Value::list(out))
         }
-        Some(Value::Nil) | None => Ok(Value::List(Vec::new())),
+        Some(Value::Nil) | None => Ok(Value::list(Vec::new())),
         _ => Err(Signal::error("flat: expected a list")),
     }
 }
@@ -1537,7 +1538,7 @@ fn b_join(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
             _ => return Err(Signal::error("join: list elements must be strings")),
         }
     }
-    Ok(Value::Str(out))
+    Ok(Value::str(out))
 }
 
 /// `(member key seq)` — the tail of a list from the first element equal to `key`
@@ -1548,7 +1549,7 @@ fn b_member(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
         .ok_or_else(|| Signal::error("member: missing key"))?;
     match args.get(1) {
         Some(Value::List(l)) => match l.iter().position(|x| values_equal(x, key)) {
-            Some(i) => Ok(Value::List(l[i..].to_vec())),
+            Some(i) => Ok(Value::list(l[i..].to_vec())),
             None => Ok(Value::Nil),
         },
         Some(Value::Str(s)) => {
@@ -1564,7 +1565,7 @@ fn b_member(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
                 return Ok(Value::Str(s.clone()));
             }
             match s.windows(k.len()).position(|w| w == k.as_slice()) {
-                Some(i) => Ok(Value::Str(s[i..].to_vec())),
+                Some(i) => Ok(Value::str(s[i..].to_vec())),
                 None => Ok(Value::Nil),
             }
         }
@@ -1578,14 +1579,14 @@ fn b_unique(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
     match args.first() {
         Some(Value::List(l)) => {
             let mut out: Vec<Value> = Vec::new();
-            for item in l {
+            for item in l.iter() {
                 if !out.iter().any(|x| values_equal(x, item)) {
                     out.push(item.clone());
                 }
             }
-            Ok(Value::List(out))
+            Ok(Value::list(out))
         }
-        Some(Value::Nil) | None => Ok(Value::List(Vec::new())),
+        Some(Value::Nil) | None => Ok(Value::list(Vec::new())),
         _ => Err(Signal::error("unique: expected a list")),
     }
 }
@@ -1623,7 +1624,7 @@ fn b_array(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
         Some(l) if !l.is_empty() => (0..size).map(|i| l[i % l.len()].clone()).collect(),
         _ => vec![Value::Nil; size],
     };
-    Ok(Value::Array(elems))
+    Ok(Value::array(elems))
 }
 
 /// `(array-list arr)` — a plain list copy of an array's elements.
