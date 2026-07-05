@@ -80,6 +80,10 @@ _Avoid_: "shared variable", "global"
 An arbitrary-precision integer value, the third rung of the numeric tower beside `i64` and `f64` (ADR-0022). It arises from a decimal literal too large for `i64` or from an `L`-suffixed literal (`12L`), never from `i64` arithmetic overflow (which wraps). `+ - * / %` yield a bigint when an operand is a bigint and none is a float; a bigint prints as plain decimal digits with no `L`. Behind a default-on `bigint` build feature, mirroring newLISP's own compile-time switch.
 _Avoid_: "bignum", "long" (newLISP's `L` is lexical only), "arbitrary integer"
 
+**array**:
+A fixed-length, list-like value (ADR-0023). It indexes, `setf`-assigns its elements, reports `length`, and prints exactly like a `list`; the only observable differences are the predicates (`array?` is true, `list?` is nil) and that it cannot be resized — `push`/`pop`/`extend` on an array are errors. `array-list` converts it to a plain list. Like a list it is an ORO value, deep-copied on store and pass.
+_Avoid_: "vector", "tuple", "fixed list"
+
 **ORO (One Reference Only)**:
 newLISP's GC-free memory model, which niiLISP commits to reproducing: every value has exactly one owner, values are deep-copied when stored in a structure or passed to a function, and memory is freed stack-wise as evaluation unwinds. Cyclic references cannot arise by construction.
 _Avoid_: "garbage collection", "refcounting", "ownership model"

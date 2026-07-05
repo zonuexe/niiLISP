@@ -25,22 +25,42 @@ what is deliberately deferred, so work can resume without re-deriving context.
   `min`/`max`/`even?`/`odd?`/`flat`/`join`/`member`/`unique`, and the
   `dostring`/`until`/`extend`/`swap` special forms.
 
-## Next task — pick up here: choose the next slice
+## Next task — pick up here: implement arrays (ADR-0023)
 
-The FFI and bigint arcs are complete and their qa targets pass. Pick the next
-piece; the roadmap below has the full list. Leading candidates:
+**Design is done and grilled ([ADR-0023](adr/0023-array-value-type.md));
+implement it.** Add `Value::Array(Vec<Value>)` — a fixed-length, list-like value
+distinguished by `array?`/`list?` — so the array-based `primes` sieve in
+`qa-factorfibo` runs. No Cargo feature (arrays pull in no dependency).
 
-- **`qa-factorfibo` tail** — uses the bigint machinery already in place, but is
-  blocked on newLISP **arrays**: it calls `array` / `array-list` (its `primes`
-  sieve is array-based). Arrays are a distinct newLISP type (own `array?`, print
-  syntax, fixed size), so this **wants a grilled ADR** first — decide whether to
-  add a `Value::Array` variant or alias arrays to lists. (`swap`, the other gap,
-  is now implemented.)
-- **qa-ref tail** — context-as-hash, string-byte places (`(setf (s 3) "D")`),
-  and `eval`/loop place-returns. Touches the place model; scope it first.
-- **Contexts as namespaces/dictionaries** or **UTF-8 char ops**
-  ([ADR-0013](adr/0013-string-representation-and-unicode.md)) — each wants its
-  own grilled ADR before implementation.
+Build order:
+
+1. **`Value::Array(Vec<Value>)`** — an always-present variant (unlike the
+   `bigint` one). Add arms to the non-catch-all `match`es: `printer::to_repr`
+   (print like a list), `type_name` (`"array"`), `is_atom` (nil for arrays),
+   `is_truthy` (empty array falsy), and `values_equal` (`Array==Array`
+   element-wise; `Array` never equals a `List`).
+2. **Reads** — accept an array where the sieve needs it: indexing `(arr i)` (the
+   list-in-function-position path), `nth`/`first`/`last`, and `length`. Reuse the
+   list code paths over the backing `Vec`.
+3. **`setf (arr i)`** — array element as a place: `resolve_place` /
+   `place_navigate` treat an `Array` like a `List` (element replacement only).
+4. **Fixed length** — `push`/`pop`/`extend` on an array error; `sort`/`reverse`/
+   `rotate` on an array error ("convert with array-list"). Mostly this falls out
+   of those ops matching `List` only, but give a clear array-specific message.
+5. **Builtins** — `array` (`(array size [init])`, cycle-fill / nil-fill,
+   multi-dim → error), `array-list` (array → list copy, else error), `array?`.
+6. **Tests** — hermetic array unit tests (construct/index/setf/length/array-list,
+   fixed-size errors, `array?`/`list?`/`atom?`), and once the sieve runs, wire
+   `qa-factorfibo` into `tests/qa.rs` (it also uses bigint `factor`-style code
+   already in place — check for any remaining gap first).
+
+**Deferred (TODO), per the ADR:** the multi-dimensional constructor; wide
+operation acceptance (arrays anywhere lists are taken, transforms returning
+lists); and length-preserving destructive ops on arrays.
+
+**Gotcha:** an always-present enum variant means every exhaustive `match` on
+`Value` without a catch-all needs an `Array` arm — check `--all-features` and
+`--no-default-features` both compile.
 
 Note the RNG distribution for `(random offset scale)` is **uniform**, not
 newLISP's; fine for `qa-bigint` (invariant-based) but revisit if a future script
