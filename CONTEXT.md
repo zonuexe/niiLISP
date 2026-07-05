@@ -76,6 +76,10 @@ _Avoid_: "threads", "async tasks", "futures"
 newLISP's OS-shared-memory cell for exchanging a single value between processes: `(share)` allocates, `(share adr val)` writes, `(share adr)` reads. Reproduced with real shared memory, consistent with the process model.
 _Avoid_: "shared variable", "global"
 
+**bigint**:
+An arbitrary-precision integer value, the third rung of the numeric tower beside `i64` and `f64` (ADR-0022). It arises from a decimal literal too large for `i64` or from an `L`-suffixed literal (`12L`), never from `i64` arithmetic overflow (which wraps). `+ - * / %` yield a bigint when an operand is a bigint and none is a float; a bigint prints as plain decimal digits with no `L`. Behind a default-on `bigint` build feature, mirroring newLISP's own compile-time switch.
+_Avoid_: "bignum", "long" (newLISP's `L` is lexical only), "arbitrary integer"
+
 **ORO (One Reference Only)**:
 newLISP's GC-free memory model, which niiLISP commits to reproducing: every value has exactly one owner, values are deep-copied when stored in a structure or passed to a function, and memory is freed stack-wise as evaluation unwinds. Cyclic references cannot arise by construction.
 _Avoid_: "garbage collection", "refcounting", "ownership model"

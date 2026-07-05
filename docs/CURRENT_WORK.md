@@ -21,7 +21,41 @@ what is deliberately deferred, so work can resume without re-deriving context.
   `upper-case`/`lower-case`/`trim`/`slice`/`find` and the `dostring` special
   form — part of the `qa-ref` tail.
 
-## Next task — pick up here: FFI follow-ups, then bigint
+## Next task — pick up here: implement bigint (ADR-0022)
+
+**Design is done and grilled ([ADR-0022](adr/0022-bigint-numeric-tower-slice.md));
+implement it.** The numeric-tower slice: add `Value::Bigint` (behind a default-on
+`bigint` Cargo feature over `num-bigint`), so over-long / `L`-suffixed decimal
+literals become arbitrary-precision integers.
+
+Build order suggested by the ADR:
+
+1. **Cargo**: add the `bigint` feature (default-on) with optional `num-bigint` +
+   `num-traits` deps, mirroring the `ffi` feature.
+2. **`Value::Bigint(BigInt)`** — a `#[cfg(feature = "bigint")]` variant (the
+   first feature-gated one); add `cfg`-gated arms to the non-catch-all `match`es
+   (`printer::to_repr`, `type_name`).
+3. **Reader**: promote an over-long decimal or `L` literal to `Value::Bigint`
+   under the feature (today it errors); keep the error path for the off build.
+4. **Arithmetic** (`+ - * / %`): the three-way lattice — float present → f64;
+   else bigint present → BigInt; else i64 wrapping. No auto-demote.
+5. **Compare / predicates / `length`**: cross-type compare (f64 if any float,
+   else BigInt-exact), `zero?`/`abs`, `integer?`/`number?`/`atom?` true for
+   bigint, `length(bigint)` = decimal digit count.
+6. **Conversions**: `bigint` (int/float-trunc/string/bigint), `int` (low 64
+   bits), `float` (`to_f64`); and **`gcd`** (Euclid on BigInt).
+7. **Tests**: hermetic bigint core (see the ADR's Acceptance) + a
+   `--no-default-features` build check that the variant compiles out.
+
+Full **qa-bigint / qa-longnum stay gated** on the deferred, non-bigint helpers
+they also use — the RNG family (`random`/`seed`/`rand`/`amb`) and
+`explode`/`chop`/`extend`/`until`/`primes`/`main-args`. Track those separately.
+
+**Gotcha:** a `cfg`-gated enum variant means every exhaustive `match` on `Value`
+without a catch-all needs a `cfg`-gated arm too, or the off build fails to
+compile — check both `--all-features` and `--no-default-features`.
+
+## Done since v0.1.0
 
 The **FFI memory API slice is done** ([ADR-0021](adr/0021-ffi-memory-api-slice.md)):
 `struct`, `pack`/`unpack` (native C ABI layout), `get-string`/`get-int`/
@@ -33,14 +67,16 @@ crashing. `qa-nullstring` passes and is wired into `tests/qa.rs`. The terse
 with `>`/`<` endian toggles, packed tightly) is also in — the ADR-0021 deferral
 is closed.
 
-Remaining FFI slices, then the next headline feature (roughly in order):
+Other slices on deck (bigint is the active task, above):
 
+- **bigint** — designed in [ADR-0022](adr/0022-bigint-numeric-tower-slice.md);
+  see the handoff at the top. Unlocks the numeric core of `qa-bigint`,
+  `qa-longnum`, and the tail of `qa-factorfibo` (each still needs separate
+  helper functions too).
 - **`address` of scalars / write-through** — `address` today only exposes a
   symbol-held *string* buffer. Symbol-held numbers have no separate buffer under
   the current value model; revisit if a test needs write-through to a scalar.
 - **simple/untyped `import`** and **Windows FFI** (ADR-0018) — later.
-- **bigint** — `L` literals + `Value::Bigint`; unlocks `qa-bigint`, `qa-longnum`,
-  and the tail of `qa-factorfibo`. Likely the next headline after FFI.
 
 **Gotcha (cost time before):** cargo's incremental build can go stale and
 silently reuse an old binary, masking a compile error. If a change seems to have

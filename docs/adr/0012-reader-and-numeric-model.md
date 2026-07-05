@@ -7,6 +7,7 @@ v1 has two number values: **`Value::Int(i64)`** (64-bit signed) and **`Value::Fl
 - **Overflow wraps.** Integer arithmetic uses wrapping operations (`wrapping_add`, etc.) so 64-bit overflow is modular, exactly as newLISP does. This deliberately **avoids Rust's defaults** (debug-build overflow panic; checked/saturating). Getting this wrong is a silent compatibility trap, hence it is called out here.
 - **No auto-promotion.** newLISP does not promote an overflowing `i64` to bigint, so niiLISP must not either — option (c), auto-promote-on-overflow, was rejected as a compatibility break.
 - **bigint is deferred past v1.** bigint literals use the **`L` suffix** (e.g. `12345L`, `123456789012345678901234580235L`). The reader **recognises the `L`-suffix syntax and raises a clear "bigint unsupported in v1" error**, reserving the syntax slot rather than mis-lexing it as a symbol. `qa-bigint`/`qa-longnum` are outside the v1 gate (ADR-0009); bigint becomes `Value::Bigint` in a later slice.
+  - **Revised by [ADR-0022](0022-bigint-numeric-tower-slice.md)** (bigint implemented, behind a default-on `bigint` feature). The literal rule here was incomplete: a decimal literal too large for `i64` also becomes a bigint, not only an `L`-suffixed one. "No auto-promotion" above refers to *arithmetic overflow* (still wraps) and is unaffected.
 
 ## Reader (lexical) surface for v1
 
