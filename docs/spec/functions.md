@@ -140,6 +140,8 @@ boundaries, while byte-oriented ops (`slice`, the implicit slice `(i str)`,
 | Function | Meaning |
 | --- | --- |
 | `(eval expr)` | evaluate a value as code |
+| `(expand expr sym…)` | substitute the named symbols' values into `expr`; `(expand expr)` auto-substitutes upper-case symbols bound to code |
+| `(args [i])` | the current function's arguments not bound to a parameter, or the `i`th |
 | `(new prototype 'name)` | create a context (FOOP class) |
 | `(term sym)` | a symbol's unqualified term (`(term 'L:a)` → `a`); see `context` |
 | `(print x…)` `(println x…)` | write to stdout (no quotes; `println` adds a newline) |

@@ -82,12 +82,19 @@ pushed after parameter binding and popped as the call unwinds.
 
 ## Acceptance
 
-- A hermetic test runs the gist's definitions and checks `to-number` of the
-  Church numerals — `ZERO`→0, `ONE`→1, `TWO`→2, `(PLUS ONE TWO)`→3,
-  `(MULT TWO THREE)`→6, `(POW TWO THREE)`→8 — and a small `expand`/`args` unit
-  check. Deep `Y`-combinator recursion (`FACT`) is exercised only at a small
-  input if it runs within the tree-walker's stack; it is commented out in the
-  gist itself.
+The gist runs to completion (its active top-level forms are `(to-number ZERO)`,
+`… ONE`, `… TWO`, `(to-number (PLUS ONE TWO))`, results discarded), and a
+hermetic test checks the Church numerals it defines: `ZERO`→0, `ONE`→1, `TWO`→2,
+`THREE`→3, `(PLUS ONE TWO)`→3, `(MULT TWO THREE)`→6, plus `expand`/`args` and
+special-form-aliasing unit checks.
+
+`POW`/`SUCC` and the commented-out boolean/pair/`Y` sections hit the gist's own
+documented **reused-variable hazard**: they bind a parameter (e.g. `X`) to a
+*code-like* value and then rebuild an inner lambda under that binding, so `expand`
+substitutes it into a parameter position. The gist author flags this ("if
+variables duplicate, expansion goes wrong … the lambda's formal parameters get
+expanded"); these are not among the gist's asserted results. Making them work
+would require lexical binding, which newLISP (and niiLISP) do not have.
 
 ## Consequences
 
@@ -99,3 +106,25 @@ pushed after parameter binding and popped as the call unwinds.
   documented gap until a target needs full identity.
 - This is a compatibility milestone: niiLISP now runs newLISP's code-as-data
   lambda idiom, its deepest peculiarity.
+
+## Outcome and refinements from implementation
+
+- **Empty `(lambda)` self-quotes to the list `(lambda)`**; any lambda with a
+  parameter list stays the compact `Value::Lambda`/`Fexpr`. That is the minimum
+  that makes `(append (lambda) …)` build a callable lambda, and it kept the
+  change small — the gist appends only to the empty lambda.
+- **Special forms are first-class enough to alias.** The gist does
+  `(define DEFINE define)` / `(define IF if)`, but niiLISP dispatches special
+  forms by name, so a special-form symbol used as a value was `nil`. Now a
+  special-form name evaluates to itself when otherwise unbound, and an operator
+  that evaluates to a special-form symbol dispatches that form — so the aliases
+  work.
+- **`expand` treats nested lambdas as opaque** (it does not descend into a
+  `(lambda …)` sublist), so a nested Church numeral's reused `F`/`X` parameters
+  are not rewritten.
+- **`(expand expr)` auto-expands only code-like values** (lists / functions), not
+  self-evaluating atoms. Substituting a bound loop variable's *number* into a
+  parameter position would break the built lambda; restricting auto-expansion to
+  code is a deliberate, documented deviation from newLISP's "any value" rule that
+  makes `PLUS`/`MULT` work. `(expand expr sym…)` (explicit) still substitutes any
+  value.

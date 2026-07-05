@@ -105,6 +105,19 @@ pub struct Interp {
     rng: RefCell<u64>,
     /// The process command line, for `(main-args)`.
     main_args: RefCell<Vec<String>>,
+    /// Per-call stack of the arguments not bound to a declared parameter, for
+    /// `(args)` (ADR-0027).
+    args_stack: RefCell<Vec<Vec<Value>>>,
+}
+
+/// Pops the `args` stack when a call returns (including on error unwind),
+/// mirroring `Scope`'s binding restore (ADR-0027).
+struct ArgsGuard<'a>(&'a Interp);
+
+impl Drop for ArgsGuard<'_> {
+    fn drop(&mut self) {
+        self.0.args_stack.borrow_mut().pop();
+    }
 }
 
 /// A dynamic-binding scope. On drop it restores every slot it changed, in
@@ -207,6 +220,7 @@ impl Interp {
             callbacks: RefCell::new(Vec::new()),
             rng: RefCell::new(default_seed()),
             main_args: RefCell::new(Vec::new()),
+            args_stack: RefCell::new(Vec::new()),
         };
         builtins::install(&interp);
         crate::ffi::install(&interp);
@@ -328,7 +342,16 @@ impl Interp {
     /// Evaluate one expression.
     pub fn eval(&self, v: &Value) -> Result<Value, Signal> {
         match v {
-            Value::Symbol(id) => Ok(self.lookup(*id)),
+            Value::Symbol(id) => {
+                let val = self.lookup(*id);
+                // A special-form name referenced as a value evaluates to itself,
+                // so it can be aliased — `(define DEFINE define)` (ADR-0027).
+                if matches!(val, Value::Nil) && SPECIAL_FORMS.contains(&self.sym_name(*id).as_str())
+                {
+                    return Ok(Value::Symbol(*id));
+                }
+                Ok(val)
+            }
             Value::List(items) => self.eval_list(items),
             other => Ok(other.clone()),
         }
@@ -364,9 +387,14 @@ impl Interp {
         match callable {
             // Implicit indexing: (i list) / (i count list).
             Value::Int(i) => self.implicit_index(i, &items[1..]),
-            // A list/array/string in function position indexes itself:
+            // A lambda-headed list `(lambda …)` in function position is called as
+            // a function (ADR-0027); any other list/array/string indexes itself:
             // (seq i) / (seq i j) — a string yields its i-th character
             // (ADR-0023/0025).
+            Value::List(l) if self.lambda_head(&l).is_some() => {
+                let is_fexpr = self.lambda_head(&l).unwrap();
+                self.call_lambda_list(&l, is_fexpr, &items[1..])
+            }
             seq @ (Value::List(_) | Value::Array(_) | Value::Str(_)) => {
                 let mut v = seq;
                 for idx in &items[1..] {
@@ -377,6 +405,17 @@ impl Interp {
             }
             // Default functor: applying a context constructs an object (ADR-0010).
             Value::Context(ctx) => self.construct(ctx, &items[1..]),
+            // An operator that evaluated to a special-form name (an alias, e.g.
+            // `DEFINE` bound to `define`) dispatches that special form with the
+            // raw arguments (ADR-0027).
+            Value::Symbol(id) => {
+                let name = self.sym_name(id);
+                if let Some(r) = self.try_special_form(&name, &items[1..]) {
+                    r
+                } else {
+                    self.apply(Value::Symbol(id), &items[1..])
+                }
+            }
             other => self.apply(other, &items[1..]),
         }
     }
@@ -519,6 +558,19 @@ impl Interp {
             Value::Lambda(l) => self.call_lambda(l, args),
             Value::Fexpr(l) => self.call_lambda(l, args),
             Value::Foreign(f) => f.call(&args),
+            // A lambda-headed list built as data (ADR-0027); args are already
+            // evaluated, so parse the params/body and call directly.
+            Value::List(l) if self.lambda_head(l).is_some() => {
+                let params = match l.get(1) {
+                    Some(Value::List(p)) => self.parse_params(p)?,
+                    _ => Vec::new(),
+                };
+                let lam = Lambda {
+                    params,
+                    body: l.get(2..).unwrap_or(&[]).to_vec(),
+                };
+                self.call_lambda(&lam, args)
+            }
             other => Err(Signal::Error(format!(
                 "not a function: {}",
                 self.repr(other)
@@ -576,8 +628,17 @@ impl Interp {
             };
             scope.bind(p.sym, v);
         }
+        // Arguments past the declared parameters are available via `(args)`
+        // (ADR-0027); the guard pops them as the call unwinds.
+        self.args_stack.borrow_mut().push(args.collect());
+        let _args_guard = ArgsGuard(self);
         self.eval_body(&l.body)
-        // `scope` drops here, restoring the outer bindings.
+        // `_args_guard` then `scope` drop here, restoring call state.
+    }
+
+    /// The current call's arguments not bound to a parameter, for `(args)`.
+    pub fn current_args(&self) -> Vec<Value> {
+        self.args_stack.borrow().last().cloned().unwrap_or_default()
     }
 
     // ---- Special forms ---------------------------------------------------
@@ -1725,6 +1786,13 @@ impl Interp {
     }
 
     fn sf_lambda(&self, args: &[Value], is_fexpr: bool) -> Result<Value, Signal> {
+        // An empty `(lambda)` self-quotes to the one-element list `(lambda)`, so
+        // `(append (lambda) …)` builds a lambda as data (ADR-0027). Anything with
+        // a parameter list uses the compact `Value::Lambda`/`Fexpr` form.
+        if args.is_empty() {
+            let head = self.intern(if is_fexpr { "lambda-macro" } else { "lambda" });
+            return Ok(Value::list(vec![Value::Symbol(head)]));
+        }
         let params = match args.first() {
             Some(Value::List(p)) => self.parse_params(p)?,
             _ => return Err(Signal::error("lambda: expected a parameter list")),
@@ -1738,6 +1806,44 @@ impl Interp {
         } else {
             Value::Lambda(lam)
         })
+    }
+
+    /// If `items` is a lambda-headed list `(lambda …)` / `(fn …)` /
+    /// `(lambda-macro …)`, whether it is a fexpr (`lambda-macro`) (ADR-0027).
+    fn lambda_head(&self, items: &[Value]) -> Option<bool> {
+        match items.first() {
+            Some(Value::Symbol(id)) => match self.sym_name(*id).as_str() {
+                "lambda" | "fn" => Some(false),
+                "lambda-macro" => Some(true),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    /// Call a lambda-headed list `(lambda (params…) body…)` built as data
+    /// (ADR-0027): parse the parameter list and body on the spot.
+    fn call_lambda_list(
+        &self,
+        items: &[Value],
+        is_fexpr: bool,
+        arg_exprs: &[Value],
+    ) -> Result<Value, Signal> {
+        let params = match items.get(1) {
+            Some(Value::List(p)) => self.parse_params(p)?,
+            Some(Value::Nil) | None => Vec::new(),
+            _ => return Err(Signal::error("lambda: parameter list expected")),
+        };
+        let lam = Lambda {
+            params,
+            body: items.get(2..).unwrap_or(&[]).to_vec(),
+        };
+        let args = if is_fexpr {
+            arg_exprs.to_vec()
+        } else {
+            self.eval_args(arg_exprs)?
+        };
+        self.call_lambda(&lam, args)
     }
 
     fn sf_self(&self, args: &[Value]) -> Result<Value, Signal> {
@@ -2488,6 +2594,51 @@ mod tests {
             "(set 'x 100000000000000000000L) (++ x 5) (= x 100000000000000000005L)"
         ));
         assert!(is_true("(set 'x 5L) (-- x 2L) (= x 3L)"));
+    }
+
+    #[test]
+    fn lambda_as_list_and_church_numerals() {
+        // The gist's core (gist.github.com/kosh04/262332): a LAMBDA macro that
+        // builds lambdas as data with `append`/`expand`/`args` (ADR-0027).
+        let prelude = "(define-macro (LAMBDA) (append (lambda) (expand (args)))) \
+             (define DEFINE define) \
+             (DEFINE ZERO  (LAMBDA (F) (LAMBDA (X) X))) \
+             (DEFINE ONE   (LAMBDA (F) (LAMBDA (X) (F X)))) \
+             (DEFINE TWO   (LAMBDA (F) (LAMBDA (X) (F (F X))))) \
+             (DEFINE THREE (LAMBDA (F) (LAMBDA (X) (F (F (F X)))))) \
+             (DEFINE (PLUS M N) (LAMBDA (F) (LAMBDA (X) ((M F) ((N F) X))))) \
+             (DEFINE (MULT M N) (LAMBDA (F) (LAMBDA (X) ((N (M F)) X)))) \
+             (define (to-number x) ((x (lambda (n) (+ n 1))) 0)) ";
+        assert_eq!(as_int(run(&format!("{prelude} (to-number ZERO)"))), 0);
+        assert_eq!(as_int(run(&format!("{prelude} (to-number ONE)"))), 1);
+        assert_eq!(as_int(run(&format!("{prelude} (to-number THREE)"))), 3);
+        assert_eq!(
+            as_int(run(&format!("{prelude} (to-number (PLUS ONE TWO))"))),
+            3
+        );
+        assert_eq!(
+            as_int(run(&format!("{prelude} (to-number (MULT TWO THREE))"))),
+            6
+        );
+    }
+
+    #[test]
+    fn lambda_list_building_blocks() {
+        // An empty (lambda) is the one-element list `(lambda)`.
+        assert!(is_true("(= (lambda) '(lambda))"));
+        // append builds a callable lambda from data.
+        assert_eq!(
+            as_int(run("(set 'f (append (lambda) '((x) (+ x 1)))) (f 41)")),
+            42
+        );
+        // (args) is the unbound argument tail of the current fexpr.
+        assert!(is_true("(define-macro (m) (args)) (= (m a b c) '(a b c))"));
+        // expand substitutes explicit symbols; upper-case auto-expand takes code.
+        assert!(is_true(
+            "(set 'A '(+ 1 2)) (= (expand '(x A) 'A) '(x (+ 1 2)))"
+        ));
+        // A special form can be aliased as a first-class value.
+        assert_eq!(as_int(run("(define IF if) (IF (= 1 1) 10 20)")), 10);
     }
 
     #[test]

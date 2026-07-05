@@ -9,7 +9,7 @@ use std::io::Write;
 
 use crate::eval::{Interp, Signal};
 use crate::printer::to_display;
-use crate::value::{Builtin, BuiltinFn, Value};
+use crate::value::{Builtin, BuiltinFn, SymId, Value};
 
 #[cfg(feature = "bigint")]
 use num_bigint::BigInt;
@@ -73,6 +73,8 @@ pub fn install(interp: &Interp) {
     reg("length", b_length);
     reg("utf8len", b_utf8len);
     reg("term", b_term);
+    reg("args", b_args);
+    reg("expand", b_expand);
     reg("append", b_append);
     reg("sequence", b_sequence);
     reg("map", b_map);
@@ -722,6 +724,99 @@ fn b_nth(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
         // Character indexing on a string (ADR-0025).
         Value::Str(b) => Ok(str_nth_char(b, idx)),
         _ => Err(Signal::error("nth: expected a list")),
+    }
+}
+
+/// `(args)` — the current lambda/fexpr's arguments not bound to a declared
+/// parameter (ADR-0027); `(args i)` indexes into them (negative from the end).
+fn b_args(interp: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    let current = interp.current_args();
+    match args.first() {
+        None => Ok(Value::list(current)),
+        Some(v) => {
+            let i = to_i64(v)?;
+            let idx = if i < 0 { current.len() as i64 + i } else { i };
+            Ok(usize::try_from(idx)
+                .ok()
+                .and_then(|k| current.get(k).cloned())
+                .unwrap_or(Value::Nil))
+        }
+    }
+}
+
+/// A lambda-headed list `(lambda …)` / `(fn …)` / `(lambda-macro …)` — `expand`
+/// treats it as opaque so it never rewrites a nested lambda's own parameters
+/// (ADR-0027), which is what lets the gist reuse `F`/`X` across nested lambdas.
+fn is_lambda_list(interp: &Interp, items: &[Value]) -> bool {
+    matches!(items.first(), Some(Value::Symbol(id))
+        if matches!(interp.sym_name(*id).as_str(), "lambda" | "fn" | "lambda-macro"))
+}
+
+/// Substitute `sym`'s current value into `v`, recursively through lists (but not
+/// into a nested lambda).
+fn expand_symbols(interp: &Interp, v: &Value, syms: &[SymId]) -> Value {
+    match v {
+        Value::Symbol(id) if syms.contains(id) => interp.lookup(*id),
+        Value::List(items) if !is_lambda_list(interp, items) => Value::list(
+            items
+                .iter()
+                .map(|x| expand_symbols(interp, x, syms))
+                .collect(),
+        ),
+        other => other.clone(),
+    }
+}
+
+/// Substitute the value of every upper-case-initial symbol bound to a **code-like**
+/// value (a list or a function), recursively (ADR-0027) — newLISP's
+/// `(expand expr)` form. Self-evaluating atoms (numbers, strings) are left as the
+/// symbol: substituting a loop variable's number into a parameter position would
+/// break the built lambda, which is the gist's documented reused-variable hazard.
+fn expand_uppercase(interp: &Interp, v: &Value) -> Value {
+    match v {
+        Value::Symbol(id) => {
+            let starts_upper = interp
+                .sym_name(*id)
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_uppercase());
+            if starts_upper {
+                let val = interp.lookup(*id);
+                if matches!(
+                    val,
+                    Value::List(_)
+                        | Value::Lambda(_)
+                        | Value::Fexpr(_)
+                        | Value::Builtin(_)
+                        | Value::Foreign(_)
+                ) {
+                    return val;
+                }
+            }
+            v.clone()
+        }
+        Value::List(items) if !is_lambda_list(interp, items) => {
+            Value::list(items.iter().map(|x| expand_uppercase(interp, x)).collect())
+        }
+        other => other.clone(),
+    }
+}
+
+/// `(expand expr sym…)` substitutes the named symbols' values into `expr`;
+/// `(expand expr)` substitutes upper-case-initial symbols with a value (ADR-0027).
+fn b_expand(interp: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    let expr = args.first().cloned().unwrap_or(Value::Nil);
+    if args.len() > 1 {
+        let syms: Vec<SymId> = args[1..]
+            .iter()
+            .filter_map(|a| match a {
+                Value::Symbol(id) => Some(*id),
+                _ => None,
+            })
+            .collect();
+        Ok(expand_symbols(interp, &expr, &syms))
+    } else {
+        Ok(expand_uppercase(interp, &expr))
     }
 }
 

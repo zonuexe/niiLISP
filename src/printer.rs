@@ -37,14 +37,36 @@ pub fn to_repr(v: &Value, it: &Interner) -> String {
             out.push(')');
             out
         }
-        Value::Lambda(l) => format!("(lambda ({} args) ...)", l.params.len()),
-        Value::Fexpr(l) => format!("(lambda-macro ({} args) ...)", l.params.len()),
+        // A lambda prints as its list form (ADR-0027): (lambda (params…) body…).
+        Value::Lambda(l) => format_lambda("lambda", l, it),
+        Value::Fexpr(l) => format_lambda("lambda-macro", l, it),
         Value::Builtin(b) => format!("<builtin:{}>", b.name),
         Value::Foreign(f) => format!("<foreign:{}>", f.name),
         // Plain decimal, no `L` suffix — the suffix is lexical only (ADR-0022).
         #[cfg(feature = "bigint")]
         Value::Bigint(n) => n.to_string(),
     }
+}
+
+/// Render a lambda/fexpr as its list form `(head (params…) body…)` (ADR-0027).
+fn format_lambda(head: &str, l: &crate::value::Lambda, it: &Interner) -> String {
+    let mut out = format!("({} (", head);
+    for (i, p) in l.params.iter().enumerate() {
+        if i > 0 {
+            out.push(' ');
+        }
+        match &p.default {
+            None => out.push_str(it.name(p.sym)),
+            Some(d) => out.push_str(&format!("({} {})", it.name(p.sym), to_repr(d, it))),
+        }
+    }
+    out.push(')');
+    for b in &l.body {
+        out.push(' ');
+        out.push_str(&to_repr(b, it));
+    }
+    out.push(')');
+    out
 }
 
 fn format_float(f: f64) -> String {

@@ -165,6 +165,13 @@ Parameters may have defaults: `(param default)`. There are no lexical closures
 (scoping is dynamic — `syntax.md` §4). A `callback` turns a niiLISP function into
 a C function pointer, represented as an integer address.
 
+A lambda/fexpr is also **list data** (ADR-0027): it prints and behaves as
+`(lambda (params…) body…)`, an empty `(lambda)` is the list `(lambda)`, `append`
+builds one from data, and a list headed by `lambda`/`fn`/`lambda-macro` is
+callable — so code can construct functions. `expand` and `args` support this
+metaprogramming, and a special form may be aliased as a value
+(`(define DEFINE define)`).
+
 ---
 
 ## Equality and ordering

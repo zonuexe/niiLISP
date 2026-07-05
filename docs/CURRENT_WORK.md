@@ -14,12 +14,13 @@ what is deliberately deferred, so work can resume without re-deriving context.
   ADR-0018/0019), **`callback`** (ADR-0020), the **FFI memory API**
   (`struct`/`pack`/`unpack`/`get-*`/`address`, ADR-0021), **bigint**
   (arbitrary-precision integers, ADR-0022), **arrays** (fixed-length,
-  ADR-0023), **copy-on-write values** (`Rc`/`make_mut`, ADR-0024), and
-  **UTF-8 character operations** (ADR-0025), and **contexts as switchable
-  namespaces** (`context`/`dotree`/`term`, ADR-0026); `case`/`if-not` promoted to
-  full special forms; a language spec under [`docs/spec/`](spec/) (syntax, types,
-  special-forms, functions).
-- Tests: 59 unit + 9 integration (`qa-exception`, `qa-foop`, `qa-nullstring`,
+  ADR-0023), **copy-on-write values** (`Rc`/`make_mut`, ADR-0024),
+  **UTF-8 character operations** (ADR-0025), **contexts as switchable
+  namespaces** (`context`/`dotree`/`term`, ADR-0026), and **lambdas as list
+  data** (`expand`/`args` + callable lambda-lists, ADR-0027); `case`/`if-not`
+  promoted to full special forms; a language spec under [`docs/spec/`](spec/)
+  (syntax, types, special-forms, functions).
+- Tests: 61 unit + 9 integration (`qa-exception`, `qa-foop`, `qa-nullstring`,
   `qa-bigint`, `qa-longnum`, `qa-utf8`, `qa-factorfibo` [`#[ignore]`d — slow
   sieve], and two hermetic `ffi` tests); the suite passes under both default
   features and `--no-default-features`.
@@ -29,40 +30,13 @@ what is deliberately deferred, so work can resume without re-deriving context.
   `min`/`max`/`even?`/`odd?`/`flat`/`join`/`member`/`unique`/`true?`, and the
   `dostring`/`until`/`extend`/`swap` special forms.
 
-## Next task — pick up here: lambdas as lists + expand/args (ADR-0027)
+## Next task — pick up here: cut the next release, then choose a slice
 
-**Release milestone: make the lambda-calculus gist
-(<https://gist.github.com/kosh04/262332>) run.** Design is done and grilled
-([ADR-0027](adr/0027-lambda-as-list-hybrid.md)); implement it. The gist's core is
-`(define-macro (LAMBDA) (append (lambda) (expand (args))))` — it builds lambdas
-with `append` and fakes static binding via upper-case `expand`.
-
-Build order:
-
-1. **List-view helper** — one function reconstructing `(lambda (params…) body…)` /
-   `(lambda-macro …)` from a `Value::Lambda`/`Fexpr`. Route **every list builtin**
-   (`append`, `first`, `rest`, `last`, `nth`, `cons`, `length`, `map`, `filter`,
-   `explode`, …) through it so a lambda uniformly reads as its list form (result
-   is a plain `List`). Keep the compact form as the stored/called value.
-2. **Callable lambda-headed lists** — in `eval_list`, a `Value::List` whose head
-   is the symbol `lambda`/`fn`/`lambda-macro` is invoked as a lambda/fexpr (params
-   = 2nd element, body = rest, parsed on call). So an `append`-built lambda runs.
-3. **Printing** — a `Lambda`/`Fexpr` prints as its list form.
-4. **`expand`** builtin — `(expand expr sym…)` substitutes the named symbols'
-   values; `(expand expr)` substitutes upper-case-initial symbols whose current
-   (dynamic) value is non-`nil`. Recursive over nested lists.
-5. **`args`** builtin — the current lambda/fexpr's arguments not bound to a
-   declared parameter (unevaluated for a fexpr); a per-call stack in `Interp`.
-6. **Tests** — run the gist and check Church numerals (`ZERO`→0, `ONE`→1,
-   `(PLUS ONE TWO)`→3, `(MULT TWO THREE)`→6, `(POW TWO THREE)`→8), plus small
-   `expand`/`args` checks.
-
-**Deferred (ADR-0027):** full list *identity* for lambdas — structural `=` with
-the list form, and in-place `setf` into a lambda body. The gist needs neither.
-
-## Other candidates after the milestone
-
-Roughly by value:
+The lambda-calculus gist milestone is **done** (ADR-0027) — a good point to cut a
+release. Use the `niilisp-release-prep` skill: bump the crate version, seal the
+`[Unreleased]` changelog, reconcile the README, verify, tag. **Before tagging, do
+the release-pipeline TODO below** (the `ffi` default feature vs the cross-compile
+matrix). After the release, candidates for the next slice, roughly by value:
 
 - **UTF-8 follow-ups** (the other half of the string arc): Unicode case folding
   for `upper-case`/`lower-case` (currently ASCII), char-based `trim`, and
@@ -88,6 +62,18 @@ newLISP's; fine for `qa-bigint` (invariant-based) but revisit if a future script
 depends on the exact distribution.
 
 ## Done since v0.1.0
+
+**Lambdas as list data** ([ADR-0027](adr/0027-lambda-as-list-hybrid.md)) — the
+release milestone: run the lambda-calculus gist
+(<https://gist.github.com/kosh04/262332>). A lambda presents newLISP's list
+interface (compact `Value::Lambda`/`Fexpr` kept as the stored/called form): empty
+`(lambda)` is the list `(lambda)`, `append` builds a lambda as data, a
+lambda-headed list is callable, and lambdas print as `(lambda (p…) body…)`. Added
+`expand` (upper-case auto-expand restricted to code-like values) and `args`, and
+made special forms aliasable as values (`(define DEFINE define)`). The gist's
+Church numerals evaluate correctly (`ZERO`..`THREE`, `PLUS`, `MULT`); `POW`/`SUCC`
+hit the gist's own documented reused-variable hazard (no lexical binding).
+Deferred: full list identity for lambdas and in-place `setf` into a body.
 
 **Contexts as switchable namespaces** ([ADR-0026](adr/0026-contexts-as-namespaces.md)):
 the reader tracks a current context set by top-level `(context 'X)` and qualifies
