@@ -1,6 +1,6 @@
 # Value representation and copy strategy (deferred)
 
-Status: proposed — decision deferred. Recorded to capture the analysis; no change is made in v1.
+Status: the copy-on-write candidate below was **accepted and implemented in [ADR-0024](0024-copy-on-write-values.md)**. The rest of this analysis (safe slot shrink, SSO, NaN-boxing, uniform-cell allocator) remains deferred, recorded so the eventual decision is not re-derived from scratch.
 
 ## Context
 

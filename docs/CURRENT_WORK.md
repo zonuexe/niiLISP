@@ -25,24 +25,41 @@ what is deliberately deferred, so work can resume without re-deriving context.
   `min`/`max`/`even?`/`odd?`/`flat`/`join`/`member`/`unique`/`true?`, and the
   `dostring`/`until`/`extend`/`swap` special forms.
 
-## Next task — pick up here: choose the next slice
+## Next task — pick up here: copy-on-write values (ADR-0024)
 
-The FFI, bigint, and array arcs are complete. `qa-factorfibo` — the array target —
-now *runs correctly* (its sieve and factorization are verified on small inputs),
-but it is **not wired as an automated test**: it builds a 1,000,000-element sieve,
-and under the current ORO model reading a large container variable deep-copies it
-(`lookup` clones, ADR-0005), so the sieve is O(n²) and takes minutes. It is gated
-on the deferred **copy strategy** ([ADR-0016](adr/0016-value-representation-and-copy-strategy.md)),
-not on missing features. Revisit wiring it once that lands.
+**Design is done and grilled ([ADR-0024](adr/0024-copy-on-write-values.md));
+implement it.** Wrap the deep-copied data variants in `Rc` and mutate through
+`Rc::make_mut`, so ORO's O(n) copy-on-store becomes O(1) sharing until write.
+This removes the clone-on-read O(n²) that gates `qa-factorfibo`'s 1,000,000-element
+sieve, and speeds up everything that passes large containers.
 
-Candidates for the next slice (all want a grilled ADR first):
+Build order (a single compiler-driven refactor — the enum change breaks all
+construction/mutation sites at once, so it cannot be staged):
 
-- **Copy strategy** ([ADR-0016](adr/0016-value-representation-and-copy-strategy.md))
-  — `Rc`/copy-on-write for `List`/`Str`/`Array` so large-container reads stop
-  deep-copying. This is what unblocks `qa-factorfibo` (and helps everything).
-- **Contexts as namespaces/dictionaries** — unlocks `qa-dictionary`.
-- **UTF-8 char ops** ([ADR-0013](adr/0013-string-representation-and-unicode.md))
-  — `utf8len`, char indexing/slicing; unlocks `qa-utf8*`.
+1. **`value.rs`** — `List(Rc<Vec<Value>>)`, `Array(Rc<Vec<Value>>)`,
+   `Str(Rc<Vec<u8>>)`. Add helper constructors `Value::list`/`array`/`str` to
+   centralise `Rc::new`.
+2. **Reads compile as-is** via `Deref` (`l.len()`/`l.iter()`/`l[i]`); fix only
+   what the compiler flags.
+3. **Construction sites** → the helper constructors (compiler flags each).
+4. **Mutation sites** → `Rc::make_mut(rc)` to get `&mut Vec`: `place_navigate`
+   (make_mut at each path step), and `push`/`pop`/`sort`/`reverse`/`rotate`/
+   `replace`/`extend`/`swap` plus the `setf`/`++`/`--` element writes.
+5. **Isolation tests** — share then mutate one owner, assert the other is
+   unchanged (flat, nested `setf`, FOOP `self`).
+6. **Measure & accept** — full suite green; the sieve's O(n²) gone (time
+   `primes` over a large N); wire `qa-factorfibo` into `tests/qa.rs` if it now
+   runs fast enough in the harness, else keep it release-verified with a note;
+   check `(tak 24 16 8)` (~0.80s, ADR-0017) is not regressed.
+
+**Gotcha:** the whole correctness argument is "every write goes through
+`make_mut`" — the type system enforces it (`&mut Vec` is unreachable from
+`&Rc<Vec>` otherwise), so trust the compiler, but keep the isolation tests as the
+behavioural check.
+
+Later slices (each wants its own grilled ADR): **contexts as namespaces/
+dictionaries** (unlocks `qa-dictionary`); **UTF-8 char ops**
+([ADR-0013](adr/0013-string-representation-and-unicode.md), unlocks `qa-utf8*`).
 
 Note the RNG distribution for `(random offset scale)` is **uniform**, not
 newLISP's; fine for `qa-bigint` (invariant-based) but revisit if a future script
