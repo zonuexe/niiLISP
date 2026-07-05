@@ -40,6 +40,9 @@ pub fn to_repr(v: &Value, it: &Interner) -> String {
         Value::Fexpr(l) => format!("(lambda-macro ({} args) ...)", l.params.len()),
         Value::Builtin(b) => format!("<builtin:{}>", b.name),
         Value::Foreign(f) => format!("<foreign:{}>", f.name),
+        // Plain decimal, no `L` suffix — the suffix is lexical only (ADR-0022).
+        #[cfg(feature = "bigint")]
+        Value::Bigint(n) => n.to_string(),
     }
 }
 

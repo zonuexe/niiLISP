@@ -45,6 +45,12 @@ pub enum Value {
     /// the `ffi` feature (ADR-0019), so pure builds never construct one.
     #[cfg_attr(not(all(feature = "ffi", unix)), allow(dead_code))]
     Foreign(Rc<crate::ffi::ForeignFn>),
+    /// An arbitrary-precision integer (CONTEXT.md: bigint, ADR-0022). Unlike
+    /// `Foreign`, the variant itself is gated on the `bigint` feature — its
+    /// payload type does not exist without the `num-bigint` dependency — so a
+    /// `--no-default-features` build compiles it out entirely.
+    #[cfg(feature = "bigint")]
+    Bigint(num_bigint::BigInt),
 }
 
 /// One formal parameter, with an optional default value (e.g. `(r 0)`).

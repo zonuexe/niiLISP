@@ -8,7 +8,7 @@ This project is not affiliated with newLISP or Nuevatec. "newLISP" and "Nuevatec
 
 ## Status
 
-Early but usable for small scripts. niiLISP has a reader (three string syntaxes, numbers, quote, comments), a tree-walking evaluator with dynamic scoping and contexts, ORO-style value semantics, FOOP objects with reference `self`, `catch`/`throw`, newLISP's reference/place model for destructive operations, a growing set of builtins (integer and float arithmetic, comparisons, lists, higher-order functions, strings, `format`, bitwise), and a first slice of `import`/FFI for calling C functions (Unix). It passes the vendored `qa-exception` and `qa-foop` suites. Not yet implemented: the FFI memory/struct API, networking, bigint, and full UTF-8 character operations. The language niiLISP accepts is described in the specification under [`docs/spec/`](docs/spec/) (start at [`syntax.md`](docs/spec/syntax.md)); design decisions live under [`docs/adr/`](docs/adr/).
+Early but usable for small scripts. niiLISP has a reader (three string syntaxes, numbers, quote, comments), a tree-walking evaluator with dynamic scoping and contexts, ORO-style value semantics, FOOP objects with reference `self`, `catch`/`throw`, newLISP's reference/place model for destructive operations, a growing set of builtins (integer, float, and arbitrary-precision **bigint** arithmetic, comparisons, lists, higher-order functions, strings, `format`, bitwise), and `import`/FFI for calling C functions with the struct/`pack` memory API and `callback`s (Unix). It passes the vendored `qa-exception`, `qa-foop`, and `qa-nullstring` suites. Not yet implemented: networking and full UTF-8 character operations. The language niiLISP accepts is described in the specification under [`docs/spec/`](docs/spec/) (start at [`syntax.md`](docs/spec/syntax.md)); design decisions live under [`docs/adr/`](docs/adr/).
 
 ## Build
 
@@ -20,10 +20,12 @@ cargo install --path .     # install `niilisp` into ~/.cargo/bin
 cargo test                 # run unit and integration tests
 ```
 
-The default build enables the `ffi` feature (`import`), which links the system
+The default build enables two features. `ffi` (`import`) links the system
 libffi on Unix — install it if missing (`brew install libffi`, or
-`apt-get install libffi-dev`). For a pure, dependency-free build without `import`,
-use `--no-default-features`. FFI is currently Unix-only.
+`apt-get install libffi-dev`); FFI is currently Unix-only. `bigint`
+(arbitrary-precision integers) pulls in the pure-Rust `num-bigint`. For a pure,
+dependency-free build without either, use `--no-default-features` (or enable just
+one, e.g. `--no-default-features --features bigint`).
 
 ## Usage
 

@@ -13,6 +13,9 @@ use crate::builtins;
 use crate::printer::to_repr;
 use crate::value::{Builtin, BuiltinFn, Interner, Lambda, Param, SymId, Value};
 
+#[cfg(feature = "bigint")]
+use num_bigint::BigInt;
+
 /// Non-local control flow: `throw` and errors both unwind to the nearest
 /// `catch` (ADR-0011).
 pub enum Signal {
@@ -79,6 +82,45 @@ impl Drop for Scope<'_> {
                 }
             }
         }
+    }
+}
+
+/// Increment a numeric place by `sign * delta` for `++`/`--`. Stays in `i64`
+/// (wrapping) unless the place or amount is a bigint, in which case it computes
+/// in `BigInt` (ADR-0022). `nil` reads as zero.
+fn incr_value(base: &Value, sign: i64, delta: &Value) -> Result<Value, Signal> {
+    #[cfg(feature = "bigint")]
+    if matches!(base, Value::Bigint(_)) || matches!(delta, Value::Bigint(_)) {
+        let b = incr_to_bigint(base)?;
+        let d = incr_to_bigint(delta)?;
+        let next = if sign < 0 { b - d } else { b + d };
+        return Ok(Value::Bigint(next));
+    }
+    let base_i = match base {
+        Value::Int(n) => *n,
+        Value::Nil => 0,
+        Value::Float(f) => *f as i64,
+        _ => return Err(Signal::error("++/--: place is not a number")),
+    };
+    let delta_i = match delta {
+        Value::Int(n) => *n,
+        Value::Float(f) => *f as i64,
+        _ => return Err(Signal::error("++/--: amount must be a number")),
+    };
+    Ok(Value::Int(base_i.wrapping_add(sign.wrapping_mul(delta_i))))
+}
+
+/// Coerce a value to `BigInt` for `++`/`--`; `nil` is zero, a float truncates.
+#[cfg(feature = "bigint")]
+fn incr_to_bigint(v: &Value) -> Result<BigInt, Signal> {
+    match v {
+        Value::Int(n) => Ok(BigInt::from(*n)),
+        Value::Nil => Ok(BigInt::from(0)),
+        Value::Bigint(b) => Ok(b.clone()),
+        Value::Float(f) if f.is_finite() => {
+            Ok(num_traits::FromPrimitive::from_f64(f.trunc()).unwrap_or_default())
+        }
+        _ => Err(Signal::error("++/--: not a number")),
     }
 }
 
@@ -598,23 +640,13 @@ impl Interp {
                 .ok_or_else(|| Signal::error("++/--: expected a place"))?,
         )?;
         let delta = match args.get(1) {
-            Some(e) => match self.eval(e)? {
-                Value::Int(n) => n,
-                Value::Float(f) => f as i64,
-                _ => return Err(Signal::error("++/--: amount must be a number")),
-            },
-            None => 1,
+            Some(e) => self.eval(e)?,
+            None => Value::Int(1),
         };
         let apply = |v: &mut Value| -> Result<Value, Signal> {
-            let base = match v {
-                Value::Int(n) => *n,
-                Value::Nil => 0,
-                Value::Float(f) => *f as i64,
-                _ => return Err(Signal::error("++/--: place is not a number")),
-            };
-            let next = base.wrapping_add(sign.wrapping_mul(delta));
-            *v = Value::Int(next);
-            Ok(Value::Int(next))
+            let next = incr_value(v, sign, &delta)?;
+            *v = next.clone();
+            Ok(next)
         };
         self.with_place_mut(&place, apply)
     }
@@ -2057,6 +2089,72 @@ mod tests {
         assert!(matches!(run("(find \"z\" \"hello\")"), Value::Nil));
         assert_eq!(as_int(run("(find 3 '(1 2 3 4))")), 2);
         assert!(matches!(run("(find 9 '(1 2 3))"), Value::Nil));
+    }
+
+    #[cfg(feature = "bigint")]
+    #[test]
+    fn bigint_literals_and_type() {
+        assert!(is_true("(integer? 12L)"));
+        assert!(is_true("(number? 12L)"));
+        assert!(is_true("(not (float? 12L))"));
+        assert!(is_true("(atom? 12L)"));
+        // An over-long decimal literal (no L) is a bigint, not a float.
+        assert!(is_true(
+            "(integer? 1234567890123456789012345678901234567890)"
+        ));
+        // Output is plain decimal — the `L` is lexical only.
+        assert_eq!(as_str(run("(string 12L)")), "12");
+    }
+
+    #[cfg(feature = "bigint")]
+    #[test]
+    fn bigint_arithmetic_and_promotion() {
+        // A large * then / round-trips exactly.
+        assert!(is_true(
+            "(set 'n 1234567890123456789012345678901234567890) (= (/ (* n n) n) n)"
+        ));
+        // int + bigint -> bigint; a fitting result stays bigint-equal to the int.
+        assert!(is_true(
+            "(= (+ 100000000000000000000L 1) 100000000000000000001L)"
+        ));
+        assert!(is_true("(= (/ 1234567891L 1234567890L) 1)"));
+        // Division truncates toward zero; remainder takes the dividend's sign.
+        assert!(is_true(
+            "(= (/ -100000000000000000007L 13) -7692307692307692308)"
+        ));
+        assert!(is_true("(= (% -100000000000000000007L 13) -3)"));
+        // `+` truncates a float argument (then bigint present -> bigint result).
+        assert!(is_true(
+            "(= (+ 2.9 100000000000000000000L) 100000000000000000002L)"
+        ));
+    }
+
+    #[cfg(feature = "bigint")]
+    #[test]
+    fn bigint_compare_convert_length_gcd() {
+        assert!(is_true("(= 1L 1)"));
+        assert!(is_true("(> 100000000000000000000L 999)"));
+        assert!(is_true("(< 5 10000000000000000000000L)"));
+        assert!(is_true("(zero? 0L)"));
+        assert!(is_true("(not (zero? 1L))"));
+        assert_eq!(as_int(run("(length 1234567890123456789012345)")), 25);
+        assert_eq!(as_str(run("(string (bigint 3.99))")), "3");
+        assert_eq!(
+            as_str(run("(string (bigint \"123456789012345678901234567890L\"))")),
+            "123456789012345678901234567890"
+        );
+        assert_eq!(as_int(run("(int 42L)")), 42);
+        assert_eq!(as_int(run("(gcd 48 36)")), 12);
+        assert!(is_true("(= (gcd 100000000000000000000L 250) 250)"));
+    }
+
+    #[cfg(feature = "bigint")]
+    #[test]
+    fn bigint_incr_decr() {
+        assert!(is_true(
+            "(set 'x 100000000000000000000L) (++ x 5) (= x 100000000000000000005L)"
+        ));
+        assert!(is_true("(set 'x 5L) (-- x 2L) (= x 3L)"));
     }
 
     #[test]

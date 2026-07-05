@@ -18,6 +18,10 @@ in [`special-forms.md`](special-forms.md); the language overview is in
 | `(* n…)` | product |
 | `(/ n…)` | integer quotient; error on divide by zero |
 | `(% a b)` | integer remainder; error on zero divisor |
+| `(gcd a b…)` | greatest common divisor (accepts bigints; `bigint` feature) |
+
+A bigint operand makes `+ - * / %` compute in arbitrary precision (see
+[`types.md`](types.md) → bigint); a float operand is truncated to an integer.
 
 ## Float arithmetic and math
 
@@ -35,8 +39,9 @@ in [`special-forms.md`](special-forms.md); the language overview is in
 
 | Function | Meaning |
 | --- | --- |
-| `(int x [default])` | to integer (float truncates/saturates; string parses) |
+| `(int x [default])` | to integer (float truncates/saturates; string parses; bigint → low 64 bits) |
 | `(float x [default])` | to float |
+| `(bigint x)` | to an arbitrary-precision integer (number or numeric string; `bigint` feature) |
 | `(char n)` / `(char "s")` | code point to 1-char string / first code point of string |
 
 ## Comparison

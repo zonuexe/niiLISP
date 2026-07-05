@@ -8,6 +8,7 @@ All notable changes to niiLISP are documented here. The format is based on
 
 ### Added
 
+- **bigint** — arbitrary-precision integers (ADR-0022). A decimal literal too large for `i64`, or any `L`-suffixed literal (`12L`), reads as a bigint; `+ - * / %` yield a bigint when an operand is one (float args are truncated to integer, as with `i64`), and a fitting result stays a bigint (no auto-demote). `bigint` converts a number/string, `gcd` is added, and `int`/`float`/comparisons/`zero?`/`abs`/`length` (digit count) understand bigints. A bigint prints as plain decimal (no `L`). Behind a default-on `bigint` Cargo feature over `num-bigint`; `--no-default-features` drops the dependency and the literals become an error again. Arithmetic overflow of two `i64`s still wraps — only literals promote.
 - String builtins: `upper-case`/`lower-case` (ASCII case, byte by byte — bytes ≥ 0x80 unchanged), `trim` (`(trim s)` / `(trim s ch)` / `(trim s l r)`), `slice` (`(slice seq start [len])` — a copied sub-range of a string or list, negative `start`/`len` counted from the end, clamped bounds), and `find` (`(find key seq)` — substring byte offset or list-element index, else `nil`).
 - `dostring` special form: `(dostring (var str [break]) body)` iterates `var` over each byte of `str` as an integer (0–255), mirroring `dolist`.
 - `case` and `if-not` are now full special forms usable in value position (not only as reference-returning place arguments); a `true`/`t` `case` label is the catch-all.

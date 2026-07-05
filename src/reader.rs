@@ -206,10 +206,7 @@ impl<'a> Reader<'a> {
         }
         match parse_number(text) {
             NumParse::Num(v) => Ok(v),
-            NumParse::Bigint => Err(format!(
-                "bigint literal `{}` is not supported in v1 (ADR-0012)",
-                text
-            )),
+            NumParse::Bigint(digits) => classify_bigint(&digits, text),
             NumParse::No => {
                 let id: SymId = self.interner.intern(text);
                 Ok(Value::Symbol(id))
@@ -234,8 +231,29 @@ fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
 
 enum NumParse {
     Num(Value),
-    Bigint,
+    /// A bigint token, carrying its canonical decimal digits (optional leading
+    /// `-`, no `L`). Either an `L`-suffixed literal or a decimal literal too
+    /// large for `i64` (ADR-0022).
+    Bigint(String),
     No,
+}
+
+/// Turn a bigint token's decimal digits into a `Value::Bigint`, or a clear
+/// error when the `bigint` feature is off (ADR-0022 revises ADR-0012).
+#[cfg(feature = "bigint")]
+fn classify_bigint(digits: &str, text: &str) -> Result<Value, String> {
+    digits
+        .parse::<num_bigint::BigInt>()
+        .map(Value::Bigint)
+        .map_err(|_| format!("invalid bigint literal `{}`", text))
+}
+
+#[cfg(not(feature = "bigint"))]
+fn classify_bigint(_digits: &str, text: &str) -> Result<Value, String> {
+    Err(format!(
+        "bigint literal `{}` requires the `bigint` feature (ADR-0022)",
+        text
+    ))
 }
 
 /// Classify a token as an int64/float number, a reserved bigint literal, or a
@@ -252,11 +270,12 @@ fn parse_number(text: &str) -> NumParse {
         return NumParse::No;
     }
 
-    // Bigint literal `123L`: reserved syntax, unsupported in v1 (ADR-0012).
+    // Bigint literal `123L` — an `L`-suffixed decimal, any magnitude (ADR-0022).
     if let Some(prefix) = text.strip_suffix('L') {
         let digits = prefix.strip_prefix(['+', '-']).unwrap_or(prefix);
         if !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit()) {
-            return NumParse::Bigint;
+            // Normalise to sign + digits (drop a leading `+`), no `L`.
+            return NumParse::Bigint(prefix.strip_prefix('+').unwrap_or(prefix).to_string());
         }
     }
 
@@ -276,6 +295,13 @@ fn parse_number(text: &str) -> NumParse {
 
     if let Ok(n) = text.parse::<i64>() {
         return NumParse::Num(Value::Int(n));
+    }
+    // A pure decimal integer that overflowed `i64` is a bigint, not a float
+    // (ADR-0022) — check before the float fallback, which would otherwise
+    // accept it as an approximate `f64`.
+    let intbody = text.strip_prefix(['+', '-']).unwrap_or(text);
+    if !intbody.is_empty() && intbody.bytes().all(|b| b.is_ascii_digit()) {
+        return NumParse::Bigint(text.strip_prefix('+').unwrap_or(text).to_string());
     }
     if let Ok(f) = text.parse::<f64>() {
         return NumParse::Num(Value::Float(f));

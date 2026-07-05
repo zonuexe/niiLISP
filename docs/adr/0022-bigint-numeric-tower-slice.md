@@ -65,20 +65,24 @@ current behaviour: an `L` / over-long literal is a clear error.
 
 ## Arithmetic promotion lattice
 
-`+ - * / %` inspect their operands:
+`+ - * / %` are the **integer** operators: a `float` argument is **truncated
+toward zero to an integer** (established newLISP behaviour, already the case in
+niiLISP — `to_i64` truncates). They never yield a float. So:
 
-1. **any operand is a `float` → the result is a `float`** (a bigint operand is
-   coerced via `to_f64`, precision permitting);
-2. else **any operand is a `bigint` → the result is a `bigint`** (computed
-   entirely in bigint);
-3. else **all `i64` → `i64`, wrapping** (unchanged, ADR-0012).
+1. **any operand is a `bigint` → the result is a `bigint`** (every operand
+   coerced to `BigInt`, a float truncated);
+2. else **all-`i64` → `i64`, wrapping** (unchanged, ADR-0012; a float truncated
+   to `i64`).
 
 A bigint result that happens to fit `i64` **stays a bigint** (no auto-demote),
 matching newLISP: `(/ 1234567891L 1234567890L)` → `1L`. Division and remainder
 **truncate toward zero**, remainder taking the dividend's sign (`num-bigint`'s
 `Div`/`Rem`, consistent with the `i64` path). Bigint division by zero errors.
-The float operators `add`/`sub`/`mul`/`div` still coerce every operand to
-`float`.
+
+The **float** operators `add`/`sub`/`mul`/`div` are separate and still coerce
+every operand to `float` (a bigint via `to_f64`). (An earlier draft of this ADR
+mistakenly gave `+` a float-result path; the integer operators truncate, as
+above.)
 
 ## Conversions
 

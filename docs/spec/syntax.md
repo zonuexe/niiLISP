@@ -44,12 +44,15 @@ niilisp` shebang is a comment).
 
 ```
 integer ::= /-?[0-9]+/ | /-?0[xX][0-9a-fA-F]+/
+bigint  ::= /-?[0-9]+L/ | /-?[0-9]+/   ; when too large for a 64-bit integer
 float   ::= /-?[0-9]*\.[0-9]+([eE][-+]?[0-9]+)?/ | /-?[0-9]+[eE][-+]?[0-9]+/
 ```
 
 Integers are 64-bit signed; integer arithmetic **wraps** on overflow. Floats are
-IEEE-754 doubles. A trailing `L` denotes a bigint literal (`123L`); bigint is
-_(planned)_ and currently rejected with a read error.
+IEEE-754 doubles. A decimal literal too large for `i64`, or any `L`-suffixed
+decimal (`123L`), is an arbitrary-precision **bigint** (ADR-0022); hexadecimal
+stays a 64-bit integer. bigint is behind a default-on `bigint` build feature —
+with it off, those literals are a read error.
 
 ### 1.3 Strings
 
@@ -386,7 +389,8 @@ addresses are undefined behaviour. FFI is Unix-only for now.
 Not exhaustive; a categorised map of the built-in vocabulary. For a per-function
 list see [`functions.md`](functions.md).
 
-- **Integer arithmetic** (wrapping): `+ - * / %`.
+- **Integer arithmetic** (wrapping): `+ - * / %`. A bigint operand makes these
+  arbitrary-precision; `bigint`/`gcd` convert and combine bigints.
 - **Float arithmetic**: `add sub mul div`, `sqrt pow exp log`, `sin cos tan
   asin acos atan`, `abs`, `mod` (NaN on zero divisor). `int` / `float` convert.
 - **Comparison**: `= != < > <= >=` (numeric or string; NaN compares as false).
@@ -414,5 +418,5 @@ A summary; the full catalogue with a cross-dialect comparison is in
 - **Macros are runtime fexprs** (`lambda-macro`), not hygienic compile-time
   macros. Code is live data (self-modifying code is possible in principle).
 - **No tail-call optimisation** and **no continuations**.
-- The numeric tower is minimal (int64 + double; bigint _(planned)_). Arrays,
-  the FFI memory API, and networking are _(planned)_.
+- The numeric tower is small (int64 + double + bigint; no ratios or complex).
+  Arrays and networking are _(planned)_.

@@ -29,10 +29,20 @@ name = "niilisp"
 path = "src/main.rs"
 
 [features]
-default = ["ffi"]
+default = ["ffi", "bigint"]
 # `import`/FFI (ADR-0018/0019). Off via --no-default-features for a pure,
 # safe, zero-native-dependency build.
 ffi = ["dep:libloading", "dep:libffi"]
+# Arbitrary-precision integers (ADR-0022), mirroring newLISP's compile-time
+# bigint switch. Off via --no-default-features drops the num-* deps for a
+# zero-dependency build; the `Value::Bigint` variant compiles out entirely.
+bigint = ["dep:num-bigint", "dep:num-traits"]
+
+# Arbitrary-precision integers for the `bigint` feature (pure Rust; cross-
+# compiles cleanly on every target, unlike the system-libffi FFI slice).
+[dependencies]
+num-bigint = { version = "0.4", optional = true }
+num-traits = { version = "0.2", optional = true }
 
 # FFI is Unix-only in the first slice (ADR-0018 revision): it links the system
 # libffi, which is OS-provided on macOS/Linux. On non-Unix targets the `ffi`

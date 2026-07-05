@@ -11,6 +11,11 @@ use crate::eval::{Interp, Signal};
 use crate::printer::to_display;
 use crate::value::{Builtin, BuiltinFn, Value};
 
+#[cfg(feature = "bigint")]
+use num_bigint::BigInt;
+#[cfg(feature = "bigint")]
+use num_traits::{FromPrimitive, Signed, ToPrimitive, Zero};
+
 pub fn install(interp: &Interp) {
     let reg = |name: &'static str, func: BuiltinFn| {
         let id = interp.intern(name);
@@ -45,6 +50,12 @@ pub fn install(interp: &Interp) {
     reg("int", b_int);
     reg("float", b_float);
     reg("char", b_char);
+    // Arbitrary-precision integers (ADR-0022), only under the `bigint` feature.
+    #[cfg(feature = "bigint")]
+    {
+        reg("bigint", b_bigint);
+        reg("gcd", b_gcd);
+    }
     // Comparison.
     reg("=", eq);
     reg("!=", ne);
@@ -112,14 +123,56 @@ fn to_i64(v: &Value) -> Result<i64, Signal> {
     match v {
         Value::Int(n) => Ok(*n),
         Value::Float(f) => Ok(*f as i64),
+        #[cfg(feature = "bigint")]
+        Value::Bigint(b) => Ok(bigint_to_i64(b)),
         _ => Err(Signal::error("expected a number")),
     }
+}
+
+// ---- bigint helpers (ADR-0022) -------------------------------------------
+
+/// True if any argument is a bigint — selects the bigint arithmetic path.
+#[cfg(feature = "bigint")]
+fn any_bigint(args: &[Value]) -> bool {
+    args.iter().any(|a| matches!(a, Value::Bigint(_)))
+}
+
+/// Coerce a numeric value to `BigInt`; a float is truncated toward zero, as the
+/// integer operators `+ - * / %` truncate float arguments (ADR-0022).
+#[cfg(feature = "bigint")]
+fn to_bigint(v: &Value) -> Result<BigInt, Signal> {
+    match v {
+        Value::Int(n) => Ok(BigInt::from(*n)),
+        Value::Bigint(b) => Ok(b.clone()),
+        Value::Float(f) if f.is_finite() => Ok(BigInt::from_f64(f.trunc()).unwrap_or_default()),
+        Value::Float(_) => Err(Signal::error(
+            "cannot convert a non-finite float to a bigint",
+        )),
+        _ => Err(Signal::error("expected a number")),
+    }
+}
+
+/// The low 64 bits of a bigint as `i64` (wrapping), for `int` and index uses;
+/// the out-of-range case is unspecified beyond this (ADR-0022).
+#[cfg(feature = "bigint")]
+fn bigint_to_i64(b: &BigInt) -> i64 {
+    b.to_i64().unwrap_or_else(|| {
+        let (sign, digits) = b.to_u64_digits();
+        let low = digits.first().copied().unwrap_or(0) as i64;
+        if matches!(sign, num_bigint::Sign::Minus) {
+            low.wrapping_neg()
+        } else {
+            low
+        }
+    })
 }
 
 fn to_f64(v: &Value) -> Result<f64, Signal> {
     match v {
         Value::Int(n) => Ok(*n as f64),
         Value::Float(f) => Ok(*f),
+        #[cfg(feature = "bigint")]
+        Value::Bigint(b) => Ok(b.to_f64().unwrap_or(f64::INFINITY)),
         _ => Err(Signal::error("expected a number")),
     }
 }
@@ -128,6 +181,8 @@ fn as_f64_opt(v: &Value) -> Option<f64> {
     match v {
         Value::Int(n) => Some(*n as f64),
         Value::Float(f) => Some(*f),
+        #[cfg(feature = "bigint")]
+        Value::Bigint(b) => Some(b.to_f64().unwrap_or(f64::INFINITY)),
         _ => None,
     }
 }
@@ -135,6 +190,14 @@ fn as_f64_opt(v: &Value) -> Option<f64> {
 // ---- integer arithmetic (wrapping, ADR-0012) -----------------------------
 
 fn add_int(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    #[cfg(feature = "bigint")]
+    if any_bigint(args) {
+        let mut acc = BigInt::from(0);
+        for a in args {
+            acc += to_bigint(a)?;
+        }
+        return Ok(Value::Bigint(acc));
+    }
     let mut acc: i64 = 0;
     for a in args {
         acc = acc.wrapping_add(to_i64(a)?);
@@ -145,6 +208,17 @@ fn add_int(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
 fn sub_int(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
     if args.is_empty() {
         return Ok(Value::Int(0));
+    }
+    #[cfg(feature = "bigint")]
+    if any_bigint(args) {
+        let mut acc = to_bigint(&args[0])?;
+        if args.len() == 1 {
+            return Ok(Value::Bigint(-acc));
+        }
+        for a in &args[1..] {
+            acc -= to_bigint(a)?;
+        }
+        return Ok(Value::Bigint(acc));
     }
     let mut acc = to_i64(&args[0])?;
     if args.len() == 1 {
@@ -157,6 +231,14 @@ fn sub_int(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
 }
 
 fn mul_int(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    #[cfg(feature = "bigint")]
+    if any_bigint(args) {
+        let mut acc = BigInt::from(1);
+        for a in args {
+            acc *= to_bigint(a)?;
+        }
+        return Ok(Value::Bigint(acc));
+    }
     let mut acc: i64 = 1;
     for a in args {
         acc = acc.wrapping_mul(to_i64(a)?);
@@ -167,6 +249,18 @@ fn mul_int(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
 fn div_int(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
     if args.is_empty() {
         return Ok(Value::Int(1));
+    }
+    #[cfg(feature = "bigint")]
+    if any_bigint(args) {
+        let mut acc = to_bigint(&args[0])?;
+        for a in &args[1..] {
+            let d = to_bigint(a)?;
+            if d.is_zero() {
+                return Err(Signal::error("division by zero"));
+            }
+            acc /= d; // truncates toward zero
+        }
+        return Ok(Value::Bigint(acc));
     }
     let mut acc = to_i64(&args[0])?;
     for a in &args[1..] {
@@ -182,6 +276,15 @@ fn div_int(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
 fn mod_int(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
     if args.len() != 2 {
         return Err(Signal::error("%: expected 2 arguments"));
+    }
+    #[cfg(feature = "bigint")]
+    if any_bigint(args) {
+        let d = to_bigint(&args[1])?;
+        if d.is_zero() {
+            return Err(Signal::error("division by zero"));
+        }
+        // Remainder takes the dividend's sign (as the i64 path does).
+        return Ok(Value::Bigint(to_bigint(&args[0])? % d));
     }
     let d = to_i64(&args[1])?;
     if d == 0 {
@@ -284,6 +387,8 @@ fn b_int(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
         // `as i64` saturates: inf -> i64::MAX/MIN, NaN -> 0, matching newLISP.
         Some(Value::Int(n)) => *n,
         Some(Value::Float(f)) => *f as i64,
+        #[cfg(feature = "bigint")]
+        Some(Value::Bigint(b)) => bigint_to_i64(b),
         Some(Value::Str(b)) => {
             let s = String::from_utf8_lossy(b);
             let t = s.trim();
@@ -306,6 +411,8 @@ fn b_float(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
     let f = match args.first() {
         Some(Value::Int(n)) => *n as f64,
         Some(Value::Float(f)) => *f,
+        #[cfg(feature = "bigint")]
+        Some(Value::Bigint(b)) => b.to_f64().unwrap_or(f64::INFINITY),
         Some(Value::Str(b)) => String::from_utf8_lossy(b)
             .trim()
             .parse::<f64>()
@@ -336,7 +443,61 @@ fn b_abs(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
     match args.first() {
         Some(Value::Int(n)) => Ok(Value::Int(n.wrapping_abs())),
         Some(Value::Float(f)) => Ok(Value::Float(f.abs())),
+        #[cfg(feature = "bigint")]
+        Some(Value::Bigint(b)) => Ok(Value::Bigint(b.abs())),
         _ => Err(Signal::error("abs: expected a number")),
+    }
+}
+
+/// `(bigint x)` — convert a number or numeric string to an arbitrary-precision
+/// integer (ADR-0022). A float is truncated toward zero; a string may carry a
+/// leading sign and a trailing `L`. Registering this builtin also makes the
+/// bare symbol `bigint` truthy, which newLISP scripts probe via `(unless bigint …)`.
+#[cfg(feature = "bigint")]
+fn b_bigint(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    let b = match args.first() {
+        Some(Value::Int(n)) => BigInt::from(*n),
+        Some(Value::Bigint(b)) => b.clone(),
+        Some(Value::Float(f)) if f.is_finite() => BigInt::from_f64(f.trunc())
+            .ok_or_else(|| Signal::error("bigint: float out of range"))?,
+        Some(Value::Float(_)) => {
+            return Err(Signal::error("bigint: cannot convert a non-finite float"))
+        }
+        Some(Value::Str(bytes)) => {
+            let s = String::from_utf8_lossy(bytes);
+            let t = s.trim();
+            let t = t.strip_suffix('L').unwrap_or(t);
+            let t = t.strip_prefix('+').unwrap_or(t);
+            t.parse::<BigInt>()
+                .map_err(|_| Signal::error("bigint: invalid numeric string"))?
+        }
+        _ => return Err(Signal::error("bigint: expected a number or string")),
+    };
+    Ok(Value::Bigint(b))
+}
+
+/// `(gcd a b …)` — greatest common divisor by Euclid on `BigInt` (ADR-0022).
+/// Returns a bigint if any argument is one, else an int.
+#[cfg(feature = "bigint")]
+fn b_gcd(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    if args.is_empty() {
+        return Err(Signal::error("gcd: expected at least one argument"));
+    }
+    let mut acc = to_bigint(&args[0])?.abs();
+    for a in &args[1..] {
+        let mut b = to_bigint(a)?.abs();
+        while !b.is_zero() {
+            let t = &acc % &b;
+            acc = b;
+            b = t;
+        }
+    }
+    if any_bigint(args) {
+        Ok(Value::Bigint(acc))
+    } else {
+        // The gcd of i64 inputs fits i64 except gcd(i64::MIN, 0); fall back to
+        // the bigint form in that rare case rather than wrapping.
+        Ok(acc.to_i64().map_or(Value::Bigint(acc), Value::Int))
     }
 }
 
@@ -348,6 +509,18 @@ pub fn values_equal(a: &Value, b: &Value) -> bool {
         (Value::Int(x), Value::Int(y)) => x == y,
         (Value::Float(x), Value::Float(y)) => x == y,
         (Value::Int(x), Value::Float(y)) | (Value::Float(y), Value::Int(x)) => (*x as f64) == *y,
+        // Cross-type numeric equality with bigint (ADR-0022): exact against an
+        // int (lift to BigInt), approximate against a float (as newLISP does).
+        #[cfg(feature = "bigint")]
+        (Value::Bigint(x), Value::Bigint(y)) => x == y,
+        #[cfg(feature = "bigint")]
+        (Value::Bigint(x), Value::Int(y)) | (Value::Int(y), Value::Bigint(x)) => {
+            *x == BigInt::from(*y)
+        }
+        #[cfg(feature = "bigint")]
+        (Value::Bigint(x), Value::Float(y)) | (Value::Float(y), Value::Bigint(x)) => {
+            x.to_f64().is_some_and(|xf| xf == *y)
+        }
         (Value::Str(x), Value::Str(y)) => x == y,
         (Value::Symbol(x), Value::Symbol(y)) => x == y,
         (Value::Context(x), Value::Context(y)) => x == y,
@@ -382,22 +555,49 @@ fn ne(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
 fn chain(args: &[Value], accept: impl Fn(Ordering) -> bool) -> Result<Value, Signal> {
     for w in args.windows(2) {
         let (a, b) = (&w[0], &w[1]);
-        if let (Some(x), Some(y)) = (as_f64_opt(a), as_f64_opt(b)) {
+        match compare_num(a, b) {
             // NaN is unordered: any comparison involving it is false (-> nil),
             // not an error (qa-float).
-            match x.partial_cmp(&y) {
-                Some(o) if accept(o) => {}
-                _ => return Ok(Value::Nil),
+            Some(Some(o)) if accept(o) => {}
+            Some(_) => return Ok(Value::Nil),
+            None => {
+                if let (Value::Str(x), Value::Str(y)) = (a, b) {
+                    if !accept(x.cmp(y)) {
+                        return Ok(Value::Nil);
+                    }
+                } else {
+                    return Err(Signal::error("cannot compare these values"));
+                }
             }
-        } else if let (Value::Str(x), Value::Str(y)) = (a, b) {
-            if !accept(x.cmp(y)) {
-                return Ok(Value::Nil);
-            }
-        } else {
-            return Err(Signal::error("cannot compare these values"));
         }
     }
     Ok(Value::True)
+}
+
+/// Numerically order two values. `None` when they are not both numeric (the
+/// caller falls back to string comparison); `Some(None)` when a NaN makes them
+/// unordered. If a float is involved the comparison is in `f64`; otherwise
+/// int/bigint operands are compared exactly via `BigInt` (ADR-0022).
+fn compare_num(a: &Value, b: &Value) -> Option<Option<Ordering>> {
+    let a_float = matches!(a, Value::Float(_));
+    let b_float = matches!(b, Value::Float(_));
+    if a_float || b_float {
+        return match (as_f64_opt(a), as_f64_opt(b)) {
+            (Some(x), Some(y)) => Some(x.partial_cmp(&y)),
+            _ => None,
+        };
+    }
+    #[cfg(feature = "bigint")]
+    if matches!(a, Value::Bigint(_)) || matches!(b, Value::Bigint(_)) {
+        return match (to_bigint(a), to_bigint(b)) {
+            (Ok(x), Ok(y)) => Some(Some(x.cmp(&y))),
+            _ => None,
+        };
+    }
+    match (a, b) {
+        (Value::Int(x), Value::Int(y)) => Some(Some(x.cmp(y))),
+        _ => None,
+    }
 }
 
 fn lt(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
@@ -486,6 +686,9 @@ fn b_length(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
     let n = match args.first() {
         Some(Value::List(l)) => l.len() as i64,
         Some(Value::Str(b)) => b.len() as i64, // bytes, per ADR-0013
+        // A bigint's length is its decimal digit count (a newLISP quirk, ADR-0022).
+        #[cfg(feature = "bigint")]
+        Some(Value::Bigint(b)) => b.to_str_radix(10).trim_start_matches('-').len() as i64,
         Some(Value::Nil) | None => 0,
         _ => 0,
     };
@@ -630,12 +833,20 @@ fn is_nil(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
     Ok(boolean(matches!(args.first(), Some(Value::Nil) | None)))
 }
 fn is_integer(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    #[cfg(feature = "bigint")]
+    if matches!(args.first(), Some(Value::Bigint(_))) {
+        return Ok(Value::True);
+    }
     Ok(boolean(matches!(args.first(), Some(Value::Int(_)))))
 }
 fn is_float(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
     Ok(boolean(matches!(args.first(), Some(Value::Float(_)))))
 }
 fn is_number(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    #[cfg(feature = "bigint")]
+    if matches!(args.first(), Some(Value::Bigint(_))) {
+        return Ok(Value::True);
+    }
     Ok(boolean(matches!(
         args.first(),
         Some(Value::Int(_)) | Some(Value::Float(_))
@@ -654,6 +865,10 @@ fn is_atom(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
     Ok(boolean(!matches!(args.first(), Some(Value::List(_)))))
 }
 fn is_zero(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    #[cfg(feature = "bigint")]
+    if matches!(args.first(), Some(Value::Bigint(b)) if b.is_zero()) {
+        return Ok(Value::True);
+    }
     Ok(boolean(
         matches!(args.first(), Some(Value::Int(0)))
             || matches!(args.first(), Some(Value::Float(f)) if *f == 0.0),
@@ -1122,5 +1337,7 @@ fn type_name(v: &Value) -> &'static str {
         Value::Fexpr(_) => "lambda-macro",
         Value::Builtin(_) => "builtin",
         Value::Foreign(_) => "foreign",
+        #[cfg(feature = "bigint")]
+        Value::Bigint(_) => "bigint",
     }
 }

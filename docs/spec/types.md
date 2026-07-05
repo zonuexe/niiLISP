@@ -45,10 +45,27 @@ A 64-bit signed integer. Integer arithmetic (`+ - * / %`) **wraps** on overflow
 rather than trapping.
 
 - Literals: decimal `42`, `-7`; hexadecimal `0xFF`.
-- A trailing `L` (`123L`) denotes a bigint literal — _(planned)_, currently a
-  read error.
 - Pointers and C handles from FFI are represented as integers.
 - Predicate: `(integer? x)`, also `(number? x)`.
+
+## bigint
+
+An arbitrary-precision integer (ADR-0022), behind a default-on `bigint` build
+feature. It is the third rung of the numeric tower; `(integer? x)` and
+`(number? x)` are true for a bigint, `(float? x)` false.
+
+- Literals: a decimal literal too large for a 64-bit `integer` (e.g. a 40-digit
+  number), or any `L`-suffixed decimal (`12L`, `-100005L`) regardless of size.
+  Hexadecimal stays a 64-bit integer. With the feature off, these literals are a
+  read error.
+- Only **literals** promote — `i64` arithmetic that overflows still wraps and
+  does not become a bigint (ADR-0012).
+- `+ - * / %` yield a bigint when an operand is one (a float operand is
+  truncated to an integer); a result that fits `i64` **stays** a bigint. Prints
+  as plain decimal, with no `L`.
+- `(bigint x)` converts a number or numeric string; `(int b)` takes the low 64
+  bits; `(float b)` converts to a double (`inf` if too large); `(length b)` is
+  the decimal digit count; `gcd` accepts bigints.
 
 ## float
 
