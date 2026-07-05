@@ -293,9 +293,10 @@ impl Interp {
         match callable {
             // Implicit indexing: (i list) / (i count list).
             Value::Int(i) => self.implicit_index(i, &items[1..]),
-            // A list or array in function position indexes itself:
-            // (seq i) / (seq i j) (ADR-0023).
-            seq @ (Value::List(_) | Value::Array(_)) => {
+            // A list/array/string in function position indexes itself:
+            // (seq i) / (seq i j) — a string yields its i-th character
+            // (ADR-0023/0025).
+            seq @ (Value::List(_) | Value::Array(_) | Value::Str(_)) => {
                 let mut v = seq;
                 for idx in &items[1..] {
                     let i = self.eval_index(idx)?;
@@ -1847,14 +1848,12 @@ fn index_one(i: i64, target: &Value) -> Value {
                 l[idx as usize].clone()
             }
         }
-        Value::Str(b) => {
-            let idx = if i < 0 { b.len() as i64 + i } else { i };
-            if idx < 0 || idx as usize >= b.len() {
-                Value::Nil
-            } else {
-                Value::str(vec![b[idx as usize]])
-            }
-        }
+        // Implicit indexing of a string is character-based (ADR-0025); the
+        // byte-based path is the implicit slice `(i str)`, in `slice_seq`.
+        Value::Str(b) => match crate::utf8::char_byte_range(b, i) {
+            Some((s, e)) => Value::str(b[s..e].to_vec()),
+            None => Value::Nil,
+        },
         _ => Value::Nil,
     }
 }
@@ -2334,6 +2333,33 @@ mod tests {
             "(set 'x 100000000000000000000L) (++ x 5) (= x 100000000000000000005L)"
         ));
         assert!(is_true("(set 'x 5L) (-- x 2L) (= x 3L)"));
+    }
+
+    #[test]
+    fn utf8_character_operations() {
+        // "caf\195\169" is café: 5 bytes, 4 characters (é is 2 bytes).
+        assert_eq!(as_int(run("(length \"caf\\195\\169\")")), 5);
+        assert_eq!(as_int(run("(utf8len \"caf\\195\\169\")")), 4);
+        // nth / implicit index / first / last / rest are character-based.
+        assert_eq!(as_str(run("(nth 3 \"caf\\195\\169\")")), "é");
+        assert_eq!(as_str(run("(\"caf\\195\\169\" 3)")), "é");
+        assert_eq!(as_str(run("(\"caf\\195\\169\" -1)")), "é");
+        assert_eq!(as_str(run("(first \"caf\\195\\169\")")), "c");
+        assert_eq!(as_str(run("(last \"caf\\195\\169\")")), "é");
+        assert_eq!(as_str(run("(rest \"caf\\195\\169\")")), "afé");
+        // explode splits on characters; round-trips through char code points.
+        assert!(is_true(
+            "(= (explode \"caf\\195\\169\") '(\"c\" \"a\" \"f\" \"é\"))"
+        ));
+        assert!(is_true(
+            "(= (map char (explode \"caf\\195\\169\")) '(99 97 102 233))"
+        ));
+        // Slicing stays byte-based (binary content): (i str) and slice.
+        assert_eq!(as_str(run("(slice \"caf\\195\\169\" 0 3)")), "caf");
+        assert_eq!(as_str(run("(3 \"caf\\195\\169\")")), "é"); // bytes 3.. = é
+                                                               // ASCII is unchanged (character and byte boundaries coincide).
+        assert!(is_true("(= (explode \"abc\") '(\"a\" \"b\" \"c\"))"));
+        assert_eq!(as_str(run("(first \"abc\")")), "a");
     }
 
     #[test]

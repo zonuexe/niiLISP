@@ -71,6 +71,7 @@ pub fn install(interp: &Interp) {
     reg("last", b_last);
     reg("nth", b_nth);
     reg("length", b_length);
+    reg("utf8len", b_utf8len);
     reg("append", b_append);
     reg("sequence", b_sequence);
     reg("map", b_map);
@@ -658,13 +659,23 @@ fn b_cons(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
     }
 }
 
+/// The `idx`-th character of a byte string as a one-character string, or `nil`
+/// out of range. Character-based (ADR-0025), so multi-byte characters stay whole.
+fn str_nth_char(bytes: &[u8], idx: i64) -> Value {
+    match crate::utf8::char_byte_range(bytes, idx) {
+        Some((s, e)) => Value::str(bytes[s..e].to_vec()),
+        None => Value::Nil,
+    }
+}
+
 fn b_first(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
     match args.first() {
         Some(Value::List(l)) | Some(Value::Array(l)) => l
             .first()
             .cloned()
             .ok_or_else(|| Signal::error("first: empty list")),
-        Some(Value::Str(b)) if !b.is_empty() => Ok(Value::str(vec![b[0]])),
+        // The first character (ADR-0025), which may be multiple bytes.
+        Some(Value::Str(b)) if !b.is_empty() => Ok(str_nth_char(b, 0)),
         _ => Err(Signal::error("first: expected a non-empty list or string")),
     }
 }
@@ -672,7 +683,11 @@ fn b_first(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
 fn b_rest(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
     match args.first() {
         Some(Value::List(l)) => Ok(Value::list(l.get(1..).unwrap_or(&[]).to_vec())),
-        Some(Value::Str(b)) => Ok(Value::str(b.get(1..).unwrap_or(&[]).to_vec())),
+        // The bytes after the first character (ADR-0025).
+        Some(Value::Str(b)) => {
+            let start = crate::utf8::first_char_end(b);
+            Ok(Value::str(b.get(start..).unwrap_or(&[]).to_vec()))
+        }
         _ => Err(Signal::error("rest: expected a list or string")),
     }
 }
@@ -683,6 +698,8 @@ fn b_last(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
             .last()
             .cloned()
             .ok_or_else(|| Signal::error("last: empty list")),
+        // The last character (ADR-0025).
+        Some(Value::Str(b)) if !b.is_empty() => Ok(str_nth_char(b, -1)),
         _ => Err(Signal::error("last: expected a list")),
     }
 }
@@ -701,7 +718,18 @@ fn b_nth(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
                 Ok(l[i as usize].clone())
             }
         }
+        // Character indexing on a string (ADR-0025).
+        Value::Str(b) => Ok(str_nth_char(b, idx)),
         _ => Err(Signal::error("nth: expected a list")),
+    }
+}
+
+/// `(utf8len str)` — the number of UTF-8 characters, vs `length`'s byte count.
+fn b_utf8len(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    match args.first() {
+        Some(Value::Str(b)) => Ok(Value::Int(crate::utf8::char_count(b) as i64)),
+        Some(Value::Nil) | None => Ok(Value::Int(0)),
+        _ => Err(Signal::error("utf8len: expected a string")),
     }
 }
 
@@ -1365,17 +1393,28 @@ fn b_chop(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
     }
 }
 
-/// `(explode seq [n])` — split a string (by byte) or list into a list of `n`-wide
-/// pieces (default 1). `(explode "abc")` -> `("a" "b" "c")`.
+/// `(explode seq [n])` — split into a list of `n`-wide pieces (default 1). A
+/// string splits on **character** boundaries (ADR-0025), so `(explode "abc")` ->
+/// `("a" "b" "c")` and a multi-byte character stays whole; a list splits by
+/// element.
 fn b_explode(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
     let n = match args.get(1) {
         Some(v) => to_i64(v)?.max(1) as usize,
         None => 1,
     };
     match args.first() {
-        Some(Value::Str(b)) => Ok(Value::list(
-            b.chunks(n).map(|c| Value::str(c.to_vec())).collect(),
-        )),
+        Some(Value::Str(b)) => {
+            // Group the character byte-ranges into chunks of `n` characters.
+            let ranges: Vec<(usize, usize)> = crate::utf8::char_ranges(b).collect();
+            let pieces = ranges
+                .chunks(n)
+                .map(|chunk| {
+                    let (start, end) = (chunk[0].0, chunk[chunk.len() - 1].1);
+                    Value::str(b[start..end].to_vec())
+                })
+                .collect();
+            Ok(Value::list(pieces))
+        }
         Some(Value::List(l)) => Ok(Value::list(
             l.chunks(n).map(|c| Value::list(c.to_vec())).collect(),
         )),

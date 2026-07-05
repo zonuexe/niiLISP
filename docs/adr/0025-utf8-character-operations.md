@@ -94,3 +94,13 @@ of a decimal string) are unaffected.
 - The eventual `Rc`-attached boundary index (ADR-0013's "decode on demand" made
   O(1)) is purely additive inside the decode layer — a later optimisation, not a
   re-design.
+
+## Outcome
+
+Implemented in `src/utf8.rs` (the decode layer) plus the char paths in
+`builtins.rs`/`eval.rs`. `utf8len`, and character-based `nth` / `(str i)` /
+`first` / `rest` / `last` / `explode`, all land on character boundaries; `slice`
+/ `(i str)` / `length` stay byte-based. Adding a string to the functor-position
+indexing arm (`(str i)`) also fixed a pre-existing gap — strings were not
+self-indexing at all before. ASCII behaviour is unchanged (existing tests green).
+The `qa-utf8*` oracles remain gated on `context`/`dotree`/`term` and `regex`.

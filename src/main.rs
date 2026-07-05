@@ -15,6 +15,7 @@ mod eval;
 mod ffi;
 mod printer;
 mod reader;
+mod utf8;
 mod value;
 
 use std::io::Read;

@@ -14,10 +14,11 @@ what is deliberately deferred, so work can resume without re-deriving context.
   ADR-0018/0019), **`callback`** (ADR-0020), the **FFI memory API**
   (`struct`/`pack`/`unpack`/`get-*`/`address`, ADR-0021), **bigint**
   (arbitrary-precision integers, ADR-0022), **arrays** (fixed-length,
-  ADR-0023), and **copy-on-write values** (`Rc`/`make_mut`, ADR-0024);
-  `case`/`if-not` promoted to full special forms; a language spec under
-  [`docs/spec/`](spec/) (syntax, types, special-forms, functions).
-- Tests: 54 unit + 8 integration (`qa-exception`, `qa-foop`, `qa-nullstring`,
+  ADR-0023), **copy-on-write values** (`Rc`/`make_mut`, ADR-0024), and
+  **UTF-8 character operations** (ADR-0025); `case`/`if-not` promoted to full
+  special forms; a language spec under [`docs/spec/`](spec/) (syntax, types,
+  special-forms, functions).
+- Tests: 58 unit + 8 integration (`qa-exception`, `qa-foop`, `qa-nullstring`,
   `qa-bigint`, `qa-longnum`, `qa-factorfibo` [`#[ignore]`d — slow sieve], and two
   hermetic `ffi` tests); the suite passes under both default features and
   `--no-default-features`.
@@ -27,51 +28,37 @@ what is deliberately deferred, so work can resume without re-deriving context.
   `min`/`max`/`even?`/`odd?`/`flat`/`join`/`member`/`unique`/`true?`, and the
   `dostring`/`until`/`extend`/`swap` special forms.
 
-## Next task — pick up here: UTF-8 character operations (ADR-0025)
+## Next task — pick up here: choose the next slice
 
-**Design is done and grilled ([ADR-0025](adr/0025-utf8-character-operations.md));
-implement it.** String storage stays byte-based (`Rc<Vec<u8>>`, binary-safe,
-ADR-0013) — this slice aligns the *character-vs-byte* semantics with newLISP and
-adds `utf8len`. No niiLISP-original functions.
+The FFI, bigint, array, copy-on-write, and UTF-8 char-ops arcs are all complete.
+Candidates for the next slice:
 
-Build order:
-
-1. **Decode layer** — a small set of Rust helpers over `&[u8]` (character count;
-   byte range of the n-th character, negative from the end; a character-boundary
-   iterator). **Lenient decoding**: character length from the lead byte
-   (`0/110/1110/11110…`), clamped to available bytes; an invalid/truncated lead
-   is a one-byte character. Never `str::chars()` (storage may be invalid UTF-8).
-   Put every char boundary computation here so a future `Rc`-attached offset
-   index can slot in without touching callers.
-2. **`utf8len`** builtin — character (code point) count. (`length` stays bytes.)
-3. **Switch to character boundaries on strings:** `nth`, `(str i)` indexing
-   (`index_one`'s `Str` arm), `first`, `rest`, `last`, and `explode`. For ASCII
-   these are unchanged, so existing tests (e.g. `qa-longnum`'s `explode`) stay
-   green.
-4. **Leave byte-based:** `slice`, the implicit slice/rest `(i str)` / `(i len
-   str)`, `length`, `find`/`starts-with`/`ends-with`. `explode` does **not** stop
-   at a NUL byte (binary-safe deviation, per the ADR).
-5. **Tests** — hermetic char-semantics tests (multi-byte `utf8len`/`nth`/
-   indexing/`first`/`rest`/`last`/`explode`; byte-based `slice`/`length`
-   unchanged; ASCII regression). Use `\ddd` byte escapes to build multi-byte
-   strings, as `qa-utf8` does.
-
-**Deferred (no current demand):** Unicode case folding for
-`upper-case`/`lower-case` (stay ASCII) and char-based `trim` — a later library
-pass. **Gated elsewhere:** a full `qa-utf8` pass also needs `context`/`dotree`/
-`term` (contexts-as-namespaces) and the `qa-utf8-*regex*` oracles need `regex` —
-separate slices; do not wire `qa-utf8*` here.
-
-Other candidates after this: **evaluator dispatch**
-([ADR-0017](adr/0017-evaluator-dispatch-and-call-path.md), `(tak 24 16 8)` ~0.82s);
-**contexts as namespaces/dictionaries** (unlocks `qa-dictionary`, and much of
-`qa-utf8`); **qa-ref tail** (string-byte places, `eval`/loop place-returns).
+- **Contexts as namespaces/dictionaries** — beyond FOOP: `(context 'name)`
+  switching, `dotree` (iterate a context's symbols), `term`, symbol tables as
+  dictionaries. Unlocks `qa-dictionary` and most of `qa-utf8` (whose `dotree`
+  loop is the remaining gap now that char ops are in). Wants its own grilled ADR.
+- **Evaluator dispatch & call path** ([ADR-0017](adr/0017-evaluator-dispatch-and-call-path.md))
+  — the throughput lever for recursion-heavy code (`(tak 24 16 8)` ~0.82s);
+  SymId dispatch, dense symbol table, dispatch cache. Its own grilled ADR.
+- **UTF-8 follow-ups** (no current demand): Unicode case folding for
+  `upper-case`/`lower-case`, char-based `trim`, and `regex` over UTF-8 (the
+  `qa-utf8-*regex*` oracles). A later standard-library pass.
+- **qa-ref tail** — string-byte places (`(setf (s 3) "D")`), `eval`/loop
+  place-returns. Touches the place model; scope first.
 
 Note the RNG distribution for `(random offset scale)` is **uniform**, not
 newLISP's; fine for `qa-bigint` (invariant-based) but revisit if a future script
 depends on the exact distribution.
 
 ## Done since v0.1.0
+
+**UTF-8 character operations** ([ADR-0025](adr/0025-utf8-character-operations.md)):
+a lenient decode layer (`src/utf8.rs`) over the binary-safe byte storage; `utf8len`
+and character-based `nth`/`(str i)`/`first`/`rest`/`last`/`explode` (multi-byte
+characters stay whole), while `slice`/`(i str)`/`length`/search stay byte-based.
+Adding a string to the functor-position indexing arm also fixed a pre-existing gap
+(strings didn't self-index at all). Deferred: Unicode case folding, char `trim`,
+regex. `qa-utf8*` stays gated on contexts (`dotree`) and regex.
 
 **Copy-on-write values** ([ADR-0024](adr/0024-copy-on-write-values.md)):
 `List`/`Array`/`Str` are `Rc`-wrapped and cloned only on write (`Rc::make_mut`).

@@ -86,8 +86,12 @@ UTF-8. Strings double as the byte buffer for I/O and FFI.
 - Three literal syntaxes (`syntax.md` §1.3): `"…"` (with escapes, including the
   decimal byte escape `\ddd`), `{…}` (raw, nestable, multi-line), and
   `[text]…[/text]` (raw block).
-- `(length s)` counts **bytes**. Character-oriented operations (`utf8len`, char
-  indexing/slicing) are _(planned)_.
+- `(length s)` counts **bytes**; `(utf8len s)` counts **characters**.
+  Character-oriented ops (`nth` / `(s i)` indexing / `first` / `rest` / `last` /
+  `explode`) work on UTF-8 character boundaries; byte-oriented ops (`slice`, the
+  implicit slice `(i s)`, substring search) stay byte-based for binary content
+  (ADR-0025). Case folding (`upper-case`/`lower-case`) is still ASCII-only
+  _(planned: Unicode)_.
 - Predicate: `(string? x)`.
 
 ## symbol

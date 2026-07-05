@@ -70,8 +70,9 @@ three syntaxes:
 [text]anything until the closing tag, even ( ) " {[/text]
 ```
 
-`length` on a string counts **bytes**; character-oriented operations (`utf8len`,
-char indexing) are _(planned)_.
+`length` on a string counts **bytes**; `utf8len` counts **characters**, and
+`nth`/`(s i)`/`first`/`rest`/`last`/`explode` work on character boundaries while
+`slice`/`(i s)` stay byte-based (ADR-0025).
 
 ### 1.4 Symbols and constants
 
@@ -157,19 +158,21 @@ values and double as FOOP classes (§7).
 
 ## 5. Lists and implicit indexing
 
-Lists (and arrays — the fixed-length variant, see [`types.md`](types.md)) are the
-core structured values. When the operator
-position holds a **list/array** or an **integer**, the form indexes instead of
-calling — but the two mean different things:
+Lists (and arrays — the fixed-length variant, see [`types.md`](types.md), and
+strings) are the core structured values. When the operator position holds a
+**list/array/string** or an **integer**, the form indexes instead of calling —
+but the two mean different things:
 
 ```
 ('(a b c) 1)         ; -> b        list/array in operator position = element (nth)
+("café" 1)           ; -> "a"      string = its i-th character (ADR-0025)
 (1 '(a b c d))       ; -> (b c d)  integer in operator position = rest from offset 1
 (1 2 '(a b c d))     ; -> (b c)    (offset length seq) = slice
 (nth 1 '(a b c))     ; -> b        the explicit form
 ```
 
-So `(seq i)` is element access and `(i seq)` is rest/slice — do not confuse them.
+So `(seq i)` is element access — a **character** for a string — and `(i seq)` is
+rest/slice, which is **byte-based** for a string (ADR-0025). Do not confuse them.
 Indices may be negative (from the end); a negative slice length counts back from
 the end. Element indexing composes: `((L 2) 0)` indexes `L[2][0]`.
 
@@ -404,9 +407,11 @@ list see [`functions.md`](functions.md).
   array-list`.
 - **Predicates**: `nil? null? true? integer? float? number? string? symbol?
   list? array? atom? zero? empty? even? odd? NaN? inf?`.
-- **Strings / sequences**: `string starts-with ends-with char upper-case
+- **Strings / sequences**: `string utf8len starts-with ends-with char upper-case
   lower-case trim slice find explode chop`, `format` (printf subset: flags,
-  width, `.precision`, and `d i u f e g x X o s c`).
+  width, `.precision`, and `d i u f e g x X o s c`). `utf8len` and
+  `nth`/`first`/`rest`/`last`/`explode` are character-based; `slice`/`length`
+  byte-based (ADR-0025).
 - **Random**: `seed rand random amb` (a shared seedable generator).
 - **I/O / misc**: `print println`, `time-of-day`, `set-locale`, `main-args`,
   `exit`, `eval`,

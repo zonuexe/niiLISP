@@ -66,9 +66,10 @@ A bigint operand makes `+ - * / %` compute in arbitrary precision (see
 | --- | --- |
 | `(list x…)` | make a list |
 | `(cons x lst)` | prepend (no dotted pairs; else a 2-list) |
-| `(first lst)` `(rest lst)` `(last lst)` | head / tail / final element |
-| `(nth i lst)` | element `i` (negative from the end) |
-| `(length x)` | list length, or string **byte** length |
+| `(first lst)` `(rest lst)` `(last lst)` | head / tail / final element (a string's first/last/rest are by **character**) |
+| `(nth i lst)` | element `i` (negative from the end); a string's `i`-th **character** |
+| `(length x)` | list/array length, or string **byte** length |
+| `(utf8len str)` | string **character** (code point) count |
 | `(append lst…)` | concatenate lists (or strings) into a copy |
 | `(sequence from to [step])` | list of numbers, inclusive |
 | `(flat lst)` | flatten a nested list to a single level |
@@ -122,14 +123,17 @@ List construction semantics (array-backed values, no dotted pairs) are in
 | `(trim s [l [r]])` | strip a char (default space) from both ends, or `l`/`r` per side |
 | `(slice seq start [len])` | copied sub-range of a string or list (see below) |
 | `(find key seq)` | index of a substring / list element, else `nil` |
-| `(explode seq [n])` | split a string/list into `n`-wide pieces (default 1) |
+| `(explode seq [n])` | split into `n`-wide pieces (default 1); a string splits by **character** |
 | `(chop seq [n])` | copy without the last `n` bytes/elements (default 1) |
 | `(format fmt arg…)` | printf-style: flags, width, `.precision`; `d i u f e g x X o s c` |
 
 `slice` and `find` index strings by **byte** (ADR-0013). In `slice`, a negative
 `start` counts from the end and a negative `len` drops that many trailing
 elements; out-of-range bounds clamp. `find` on a list compares elements
-structurally (`=`).
+structurally (`=`). Character-oriented string ops (`nth` / `(str i)` /
+`first` / `rest` / `last` / `explode` / `utf8len`) work on UTF-8 character
+boundaries, while byte-oriented ops (`slice`, the implicit slice `(i str)`,
+`length`, substring search) stay byte-based for binary content (ADR-0025).
 
 ## Evaluation, objects, system
 
