@@ -75,6 +75,8 @@ A bigint operand makes `+ - * / %` compute in arbitrary precision (see
 | `(member key seq)` | tail of a list / substring of a string from the first match |
 | `(unique lst)` | copy with duplicate elements removed (first kept) |
 | `(join lst [sep])` | concatenate a list of strings with an optional separator |
+| `(array size [init])` | a fixed-length array (cycle-fill / nil-fill); see [`types.md`](types.md) |
+| `(array-list arr)` | a plain list copy of an array |
 
 List construction semantics (array-backed values, no dotted pairs) are in
 [`types.md`](types.md). Destructive list operators (`push`, `pop`, `swap`, `reverse`,
@@ -102,9 +104,10 @@ List construction semantics (array-backed values, no dotted pairs) are in
 | Function | Meaning |
 | --- | --- |
 | `(nil? x)` / `(null? x)` | is `nil` |
+| `(true? x)` | not `nil` and not the empty list/array |
 | `(integer? x)` `(float? x)` `(number? x)` | numeric kind |
-| `(string? x)` `(symbol? x)` `(list? x)` | type |
-| `(atom? x)` | not a list |
+| `(string? x)` `(symbol? x)` `(list? x)` `(array? x)` | type |
+| `(atom? x)` | not a list or array |
 | `(zero? x)` | numerically zero |
 | `(empty? x)` | empty list/string, or `nil` |
 | `(not x)` | logical negation (`nil`/`()` are false) |

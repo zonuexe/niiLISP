@@ -32,6 +32,10 @@ pub enum Value {
     Symbol(SymId),
     /// A `Vec`-backed list (ADR-0005). Also the substrate for FOOP objects.
     List(Vec<Value>),
+    /// A fixed-length, list-like value (CONTEXT.md: array, ADR-0023). Backed by
+    /// the same `Vec`, but a distinct type: `array?`/`list?` tell them apart and
+    /// it cannot be resized.
+    Array(Vec<Value>),
     /// A context (namespace / FOOP class), named by its symbol (CONTEXT.md: Context).
     Context(SymId),
     /// A user function: evaluates its arguments.
@@ -76,9 +80,11 @@ pub struct Builtin {
 }
 
 impl Value {
-    /// newLISP truthiness: only `nil` and the empty list are false.
+    /// newLISP truthiness: only `nil` and an empty list/array are false.
     pub fn is_truthy(&self) -> bool {
-        !matches!(self, Value::Nil) && !matches!(self, Value::List(l) if l.is_empty())
+        !matches!(self, Value::Nil)
+            && !matches!(self, Value::List(l) if l.is_empty())
+            && !matches!(self, Value::Array(a) if a.is_empty())
     }
 }
 

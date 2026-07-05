@@ -117,7 +117,22 @@ context's symbol).
   (`syntax.md` §5); negative indices count from the end.
 - Mutated through place forms (`push`, `pop`, `setf`, `sort`, … — see
   `special-forms.md`).
-- Predicate: `(list? x)`; `(atom? x)` is true for non-lists.
+- Predicate: `(list? x)`; `(atom? x)` is true for non-lists (and non-arrays).
+
+## array
+
+A **fixed-length**, list-like value (ADR-0023). It indexes, `setf`-assigns its
+elements, reports `length`, and **prints exactly like a list** — the differences
+from a list are only the predicates and that it cannot be resized.
+
+- Built with `(array size [init])`: cycle-filled from `init` (repeating a shorter
+  list, truncating a longer one), or nil-filled with no `init`. Only 1-D arrays
+  are built for now (a second dimension errors).
+- `(array-list arr)` converts it to a plain list; `(array? x)` is the predicate,
+  and `(list? arr)` is **nil** while `(atom? arr)` is also **nil** (like a list).
+- Fixed length: `setf` replaces an element, but `push`/`pop`/`extend` error.
+- An array equals another array element-wise, but **never a list** — convert with
+  `array-list` to compare against one. An empty array is falsy, like `()`.
 
 ## context
 

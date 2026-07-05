@@ -12,61 +12,58 @@ what is deliberately deferred, so work can resume without re-deriving context.
   and a core builtin set. Passes vendored `qa-exception` and `qa-foop`.
 - Since v0.1.0 (all on `master`, unreleased): **FFI `import`** (typed C calls,
   ADR-0018/0019), **`callback`** (ADR-0020), the **FFI memory API**
-  (`struct`/`pack`/`unpack`/`get-*`/`address`, ADR-0021), and **bigint**
-  (arbitrary-precision integers, ADR-0022); `case`/`if-not` promoted to full
-  special forms; a language spec under [`docs/spec/`](spec/) (syntax, types,
-  special-forms, functions).
-- Tests: 50 unit + 7 integration (`qa-exception`, `qa-foop`, `qa-nullstring`,
+  (`struct`/`pack`/`unpack`/`get-*`/`address`, ADR-0021), **bigint**
+  (arbitrary-precision integers, ADR-0022), and **arrays** (fixed-length,
+  ADR-0023); `case`/`if-not` promoted to full special forms; a language spec
+  under [`docs/spec/`](spec/) (syntax, types, special-forms, functions).
+- Tests: 53 unit + 7 integration (`qa-exception`, `qa-foop`, `qa-nullstring`,
   `qa-bigint`, `qa-longnum`, and two hermetic `ffi` tests); the suite passes
   under both default features and `--no-default-features`.
 - Standard-library fill-ins (byte-based, no UTF-8 dependency): string builtins
   `upper-case`/`lower-case`/`trim`/`slice`/`find`/`explode`/`chop`, the RNG
   (`seed`/`rand`/`random`/`amb`), `main-args`, the list/number builtins
-  `min`/`max`/`even?`/`odd?`/`flat`/`join`/`member`/`unique`, and the
+  `min`/`max`/`even?`/`odd?`/`flat`/`join`/`member`/`unique`/`true?`, and the
   `dostring`/`until`/`extend`/`swap` special forms.
 
-## Next task — pick up here: implement arrays (ADR-0023)
+## Next task — pick up here: choose the next slice
 
-**Design is done and grilled ([ADR-0023](adr/0023-array-value-type.md));
-implement it.** Add `Value::Array(Vec<Value>)` — a fixed-length, list-like value
-distinguished by `array?`/`list?` — so the array-based `primes` sieve in
-`qa-factorfibo` runs. No Cargo feature (arrays pull in no dependency).
+The FFI, bigint, and array arcs are complete. `qa-factorfibo` — the array target —
+now *runs correctly* (its sieve and factorization are verified on small inputs),
+but it is **not wired as an automated test**: it builds a 1,000,000-element sieve,
+and under the current ORO model reading a large container variable deep-copies it
+(`lookup` clones, ADR-0005), so the sieve is O(n²) and takes minutes. It is gated
+on the deferred **copy strategy** ([ADR-0016](adr/0016-value-representation-and-copy-strategy.md)),
+not on missing features. Revisit wiring it once that lands.
 
-Build order:
+Candidates for the next slice (all want a grilled ADR first):
 
-1. **`Value::Array(Vec<Value>)`** — an always-present variant (unlike the
-   `bigint` one). Add arms to the non-catch-all `match`es: `printer::to_repr`
-   (print like a list), `type_name` (`"array"`), `is_atom` (nil for arrays),
-   `is_truthy` (empty array falsy), and `values_equal` (`Array==Array`
-   element-wise; `Array` never equals a `List`).
-2. **Reads** — accept an array where the sieve needs it: indexing `(arr i)` (the
-   list-in-function-position path), `nth`/`first`/`last`, and `length`. Reuse the
-   list code paths over the backing `Vec`.
-3. **`setf (arr i)`** — array element as a place: `resolve_place` /
-   `place_navigate` treat an `Array` like a `List` (element replacement only).
-4. **Fixed length** — `push`/`pop`/`extend` on an array error; `sort`/`reverse`/
-   `rotate` on an array error ("convert with array-list"). Mostly this falls out
-   of those ops matching `List` only, but give a clear array-specific message.
-5. **Builtins** — `array` (`(array size [init])`, cycle-fill / nil-fill,
-   multi-dim → error), `array-list` (array → list copy, else error), `array?`.
-6. **Tests** — hermetic array unit tests (construct/index/setf/length/array-list,
-   fixed-size errors, `array?`/`list?`/`atom?`), and once the sieve runs, wire
-   `qa-factorfibo` into `tests/qa.rs` (it also uses bigint `factor`-style code
-   already in place — check for any remaining gap first).
-
-**Deferred (TODO), per the ADR:** the multi-dimensional constructor; wide
-operation acceptance (arrays anywhere lists are taken, transforms returning
-lists); and length-preserving destructive ops on arrays.
-
-**Gotcha:** an always-present enum variant means every exhaustive `match` on
-`Value` without a catch-all needs an `Array` arm — check `--all-features` and
-`--no-default-features` both compile.
+- **Copy strategy** ([ADR-0016](adr/0016-value-representation-and-copy-strategy.md))
+  — `Rc`/copy-on-write for `List`/`Str`/`Array` so large-container reads stop
+  deep-copying. This is what unblocks `qa-factorfibo` (and helps everything).
+- **Contexts as namespaces/dictionaries** — unlocks `qa-dictionary`.
+- **UTF-8 char ops** ([ADR-0013](adr/0013-string-representation-and-unicode.md))
+  — `utf8len`, char indexing/slicing; unlocks `qa-utf8*`.
 
 Note the RNG distribution for `(random offset scale)` is **uniform**, not
 newLISP's; fine for `qa-bigint` (invariant-based) but revisit if a future script
 depends on the exact distribution.
 
 ## Done since v0.1.0
+
+**arrays** ([ADR-0023](adr/0023-array-value-type.md)): `Value::Array` — a
+fixed-length, list-like value (`array?` true / `list?` nil, prints like a list),
+built with `(array size [init])` (cycle/nil fill), converted by `array-list`.
+Reuses the list machinery for indexing/place/copy; `setf`-element works,
+`push`/`pop`/`extend` error. Added `true?` (needed by the sieve's `filter`).
+Incidentally **corrected implicit indexing**: a number in functor position is
+rest/slice (`(2 lst)` → tail from 2), matching newLISP — element access is
+`(lst i)`. Also fixed an O(n²): the indexed-place guard no longer clones the whole
+container per `setf`.
+
+**qa-bigint / qa-longnum helpers**: a seedable xorshift RNG (`seed`/`rand`/
+`random`/`amb`), the `until` loop, `extend` (destructive place append),
+`explode`/`chop`, and `main-args`. `qa-bigint` (scaled down via `(main-args -1)`
+to keep the test fast) and `qa-longnum` are wired into `tests/qa.rs`.
 
 **qa-bigint / qa-longnum helpers**: a seedable xorshift RNG (`seed`/`rand`/
 `random`/`amb`), the `until` loop, `extend` (destructive place append),
@@ -113,8 +110,10 @@ Other slices on deck (bigint is the active task, above):
 
 - **bigint** — **done** ([ADR-0022](adr/0022-bigint-numeric-tower-slice.md)),
   and `qa-bigint` / `qa-longnum` now pass and are wired into `tests/qa.rs` (their
-  RNG / string helpers landed too). `qa-factorfibo`'s bigint tail still needs a
-  `primes` sieve builtin.
+  RNG / string helpers landed too).
+- **arrays** — **done** ([ADR-0023](adr/0023-array-value-type.md)). `qa-factorfibo`
+  runs correctly but is gated on the copy-strategy optimisation (ADR-0016) for its
+  million-element sieve, so it is not yet an automated test.
 - **`address` of scalars / write-through** — `address` today only exposes a
   symbol-held *string* buffer. Symbol-held numbers have no separate buffer under
   the current value model; revisit if a test needs write-through to a scalar.

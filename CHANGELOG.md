@@ -8,12 +8,20 @@ All notable changes to niiLISP are documented here. The format is based on
 
 ### Added
 
+- **arrays** — newLISP's fixed-length, list-like value (ADR-0023). `(array size [init])` builds one (cycle-filling from `init`, else nil-filling); it indexes, `setf`-assigns elements, reports `length`, and prints like a list, but `array?` is true / `list?` is nil and it cannot be resized (`push`/`pop`/`extend` error). `array-list` converts it to a list. `true?` predicate added. (1-D only; the multi-dimensional constructor and wide list-op acceptance are deferred.)
 - More standard builtins: `min`/`max` (numeric, type-preserving), `even?`/`odd?` (integers and bigints), `flat` (flatten a nested list), `join` (concatenate a list of strings with an optional separator), `member` (list tail / substring from the first match), `unique` (drop duplicate list elements), and the `swap` special form (exchange two places).
 - Helper functions that, with bigint, make the vendored `qa-bigint` and `qa-longnum` suites pass: a seedable RNG — `seed`, `rand` (`(rand max [count])`), `random` (`(random)` in `[0,1)`, `(random offset scale [count])`) — and `amb` (evaluate one argument at random); the `until` loop special form (inverse of `while`); `extend` (destructively append to a string or list place); `explode` (split a string/list into `n`-wide pieces) and `chop` (drop the last `n` bytes/elements); and `main-args` (the process command line).
 - **bigint** — arbitrary-precision integers (ADR-0022). A decimal literal too large for `i64`, or any `L`-suffixed literal (`12L`), reads as a bigint; `+ - * / %` yield a bigint when an operand is one (float args are truncated to integer, as with `i64`), and a fitting result stays a bigint (no auto-demote). `bigint` converts a number/string, `gcd` is added, and `int`/`float`/comparisons/`zero?`/`abs`/`length` (digit count) understand bigints. A bigint prints as plain decimal (no `L`). Behind a default-on `bigint` Cargo feature over `num-bigint`; `--no-default-features` drops the dependency and the literals become an error again. Arithmetic overflow of two `i64`s still wraps — only literals promote.
 - String builtins: `upper-case`/`lower-case` (ASCII case, byte by byte — bytes ≥ 0x80 unchanged), `trim` (`(trim s)` / `(trim s ch)` / `(trim s l r)`), `slice` (`(slice seq start [len])` — a copied sub-range of a string or list, negative `start`/`len` counted from the end, clamped bounds), and `find` (`(find key seq)` — substring byte offset or list-element index, else `nil`).
 - `dostring` special form: `(dostring (var str [break]) body)` iterates `var` over each byte of `str` as an integer (0–255), mirroring `dolist`.
 - `case` and `if-not` are now full special forms usable in value position (not only as reference-returning place arguments); a `true`/`t` `case` label is the catch-all.
+
+### Fixed
+
+- Implicit indexing: a **number** in functor position is now rest/slice, matching newLISP — `(2 lst)` is the tail from offset 2, `(2 3 lst)` takes 3 elements (a negative length counts from the end). Element access is `(lst i)` (a list/array in functor position), which is unchanged.
+- `setf` into an indexed place (`(setf (v i) …)`) no longer copies the whole container to type-check it, so tight in-place mutation loops over a large list or array are no longer O(n²).
+
+### Added (continued)
 
 - `import`/FFI, first slice: call C functions from shared libraries with typed signatures — `(import "libm.so" "cos" "double" "double")` then `(cos x)`. Supports `void`, `int`, `long`, `float`, `double`, `char*`, and `void*`; `import` returns `nil` when a library or symbol cannot be resolved. Behind a default-on `ffi` Cargo feature (Unix only for now; `--no-default-features` gives a pure, safe, dependency-free build). Uses the system libffi via `libloading` + `libffi`.
 - `callback`: pass a niiLISP function to C as a function pointer — `(apply_cb (callback 'f "int" "int") 21)`. Implemented with libffi closures; a `throw`/error inside a callback is reported to stderr and does not cross the C boundary.

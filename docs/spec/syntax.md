@@ -157,18 +157,21 @@ values and double as FOOP classes (§7).
 
 ## 5. Lists and implicit indexing
 
-Lists are the core structured value. When the operator position holds an
-**integer** or a **list**, the form performs indexing instead of a call:
+Lists (and arrays — the fixed-length variant, see [`types.md`](types.md)) are the
+core structured values. When the operator
+position holds a **list/array** or an **integer**, the form indexes instead of
+calling — but the two mean different things:
 
 ```
-(nth 1 '(a b c))     ; -> b
-('(a b c) 1)         ; -> b        (list in operator position)
-(1 '(a b c d))       ; -> b        (integer in operator position)
-(0 2 '(a b c d))     ; -> (a b)    (start count list) slice
+('(a b c) 1)         ; -> b        list/array in operator position = element (nth)
+(1 '(a b c d))       ; -> (b c d)  integer in operator position = rest from offset 1
+(1 2 '(a b c d))     ; -> (b c)    (offset length seq) = slice
+(nth 1 '(a b c))     ; -> b        the explicit form
 ```
 
-Indices may be negative (from the end). Implicit indexing composes:
-`((L 2) 0)` indexes `L[2][0]`.
+So `(seq i)` is element access and `(i seq)` is rest/slice — do not confuse them.
+Indices may be negative (from the end); a negative slice length counts back from
+the end. Element indexing composes: `((L 2) 0)` indexes `L[2][0]`.
 
 ---
 
@@ -396,10 +399,11 @@ list see [`functions.md`](functions.md).
   asin acos atan`, `abs`, `mod` (NaN on zero divisor). `int` / `float` convert.
 - **Comparison**: `= != < > <= >=` (numeric or string; NaN compares as false).
 - **Bitwise**: `& | ^ << >>`.
-- **Lists**: `list cons first rest last nth length append reverse sort`,
-  `map apply filter sequence dup flat member unique join swap`.
+- **Lists / arrays**: `list cons first rest last nth length append reverse sort`,
+  `map apply filter sequence dup flat member unique join swap`, `array
+  array-list`.
 - **Predicates**: `nil? null? true? integer? float? number? string? symbol?
-  list? atom? zero? empty? even? odd? NaN? inf?`.
+  list? array? atom? zero? empty? even? odd? NaN? inf?`.
 - **Strings / sequences**: `string starts-with ends-with char upper-case
   lower-case trim slice find explode chop`, `format` (printf subset: flags,
   width, `.precision`, and `d i u f e g x X o s c`).
@@ -422,4 +426,4 @@ A summary; the full catalogue with a cross-dialect comparison is in
   macros. Code is live data (self-modifying code is possible in principle).
 - **No tail-call optimisation** and **no continuations**.
 - The numeric tower is small (int64 + double + bigint; no ratios or complex).
-  Arrays and networking are _(planned)_.
+  Arrays exist (fixed-length, 1-D). Networking is _(planned)_.

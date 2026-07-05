@@ -293,9 +293,10 @@ impl Interp {
         match callable {
             // Implicit indexing: (i list) / (i count list).
             Value::Int(i) => self.implicit_index(i, &items[1..]),
-            // A list in function position indexes itself: (lst i) / (lst i j).
-            list @ Value::List(_) => {
-                let mut v = list;
+            // A list or array in function position indexes itself:
+            // (seq i) / (seq i j) (ADR-0023).
+            seq @ (Value::List(_) | Value::Array(_)) => {
+                let mut v = seq;
                 for idx in &items[1..] {
                     let i = self.eval_index(idx)?;
                     v = index_one(i, &v);
@@ -385,6 +386,20 @@ impl Interp {
         Ok(loc.clone())
     }
 
+    /// Whether the value at `place` is indexable (list/array/string), without
+    /// cloning it — used by the place guard, which would otherwise copy a whole
+    /// container on every indexed write (O(n) per `setf`, O(n²) in a loop).
+    fn place_is_indexable(&self, place: &Place) -> Result<bool, Signal> {
+        let mut g = self.globals.borrow_mut();
+        let root = g.entry(place.root).or_insert(Value::Nil);
+        let loc = place_navigate(root, &place.path)
+            .ok_or_else(|| Signal::error("place index out of range"))?;
+        Ok(matches!(
+            loc,
+            Value::List(_) | Value::Array(_) | Value::Str(_)
+        ))
+    }
+
     /// If `name` is context-qualified (`Ctx:member`), ensure the bare context
     /// symbol evaluates to its Context value.
     fn ensure_context(&self, qualified: SymId) {
@@ -399,23 +414,27 @@ impl Interp {
         }
     }
 
-    /// `(i list)` -> element i; `(i count list)` -> slice of `count` from `i`.
+    /// A number in functor position is implicit **rest/slice** (not element
+    /// access — that is `(seq i)`, a list/array in functor position): `(i seq)`
+    /// is the sub-sequence from offset `i` to the end; `(i len seq)` takes `len`
+    /// elements (a negative `len` counts from the end). newLISP manual,
+    /// "Implicit indexing for rest and slice".
     fn implicit_index(&self, i: i64, rest: &[Value]) -> Result<Value, Signal> {
         match rest.len() {
             1 => {
                 let target = self.eval(&rest[0])?;
-                Ok(index_one(i, &target))
+                Ok(slice_seq(i, None, &target))
             }
             2 => {
-                let count = match self.eval(&rest[0])? {
+                let len = match self.eval(&rest[0])? {
                     Value::Int(n) => n,
-                    _ => return Err(Signal::error("implicit slice: count must be an integer")),
+                    _ => return Err(Signal::error("implicit slice: length must be an integer")),
                 };
                 let target = self.eval(&rest[1])?;
-                Ok(slice(i, count, &target))
+                Ok(slice_seq(i, Some(len), &target))
             }
             _ => Err(Signal::error(
-                "implicit index: expected (i list) or (i count list)",
+                "implicit index: expected (i seq) or (i len seq)",
             )),
         }
     }
@@ -1215,12 +1234,10 @@ impl Interp {
                     }
                 }
                 // Implicit indexing place: (container idx idx ...). Only valid
-                // when the container is an indexable value (list/string); this
-                // rules out ordinary function calls like (list 1 2 3).
+                // when the container is an indexable value (list/array/string);
+                // this rules out ordinary function calls like (list 1 2 3).
                 let mut p = self.resolve_place(&items[0])?;
-                if items.len() > 1
-                    && !matches!(self.read_place(&p)?, Value::List(_) | Value::Str(_))
-                {
+                if items.len() > 1 && !self.place_is_indexable(&p)? {
                     return Err(Signal::error("not an indexable place"));
                 }
                 for idx in &items[1..] {
@@ -1712,7 +1729,9 @@ fn place_navigate<'a>(root: &'a mut Value, path: &[i64]) -> Option<&'a mut Value
     let mut cur = root;
     for &raw in path {
         match cur {
-            Value::List(l) => {
+            // A list or array navigates the same way; setf replaces the element
+            // in place, which respects an array's fixed length (ADR-0023).
+            Value::List(l) | Value::Array(l) => {
                 let i = if raw < 0 { l.len() as i64 + raw } else { raw };
                 if i < 0 || i as usize >= l.len() {
                     return None;
@@ -1813,7 +1832,8 @@ fn num(v: &Value) -> Result<f64, Signal> {
 /// Element access with newLISP-style negative indexing; out of range -> nil.
 fn index_one(i: i64, target: &Value) -> Value {
     match target {
-        Value::List(l) => {
+        // A list or array indexes the same way (ADR-0023).
+        Value::List(l) | Value::Array(l) => {
             let idx = if i < 0 { l.len() as i64 + i } else { i };
             if idx < 0 || idx as usize >= l.len() {
                 Value::Nil
@@ -1833,24 +1853,31 @@ fn index_one(i: i64, target: &Value) -> Value {
     }
 }
 
-/// `count` elements starting at `start` (negative start counts from the end).
-fn slice(start: i64, count: i64, target: &Value) -> Value {
-    let take = |len: usize| -> (usize, usize) {
+/// Implicit rest/slice: the sub-sequence of `target` from offset `start`
+/// (negative from the end); `len` omitted runs to the end, a negative `len`
+/// counts from the end. Slicing an array yields a list (a transform, ADR-0023).
+fn slice_seq(start: i64, len: Option<i64>, target: &Value) -> Value {
+    fn bounds(n: usize, start: i64, len: Option<i64>) -> (usize, usize) {
+        let n = n as i64;
         let s = if start < 0 {
-            (len as i64 + start).max(0)
+            (n + start).max(0)
         } else {
-            start.min(len as i64)
-        } as usize;
-        let end = (s as i64 + count.max(0)).min(len as i64) as usize;
-        (s, end)
-    };
+            start.min(n)
+        };
+        let e = match len {
+            None => n,
+            Some(l) if l >= 0 => (s + l).min(n),
+            Some(l) => n + l, // negative: counted from the end
+        };
+        (s as usize, e.clamp(s, n) as usize)
+    }
     match target {
-        Value::List(l) => {
-            let (s, e) = take(l.len());
+        Value::List(l) | Value::Array(l) => {
+            let (s, e) = bounds(l.len(), start, len);
             Value::List(l[s..e].to_vec())
         }
         Value::Str(b) => {
-            let (s, e) = take(b.len());
+            let (s, e) = bounds(b.len(), start, len);
             Value::Str(b[s..e].to_vec())
         }
         _ => Value::Nil,
@@ -2028,9 +2055,14 @@ mod tests {
 
     #[test]
     fn implicit_index_and_slice() {
-        assert_eq!(as_int(run("(2 (list 10 20 30 40))")), 30);
-        // (0 2 list) -> first two elements.
-        assert_eq!(as_int(run("(length (0 2 (list 5 6 7 8)))")), 2);
+        // A number in functor position is rest/slice, not element access
+        // (element access is `(seq i)`): `(2 lst)` is the tail from offset 2.
+        assert!(is_true("(= (2 (list 10 20 30 40)) '(30 40))"));
+        // `(offset len seq)` — first two elements; a negative len counts back.
+        assert!(is_true("(= (0 2 (list 5 6 7 8)) '(5 6))"));
+        assert!(is_true("(= (2 -1 (list 10 20 30 40 50)) '(30 40))"));
+        // Element access via a list in functor position still works.
+        assert_eq!(as_int(run("((list 10 20 30 40) 2)")), 30);
     }
 
     #[test]
@@ -2296,6 +2328,48 @@ mod tests {
             "(set 'x 100000000000000000000L) (++ x 5) (= x 100000000000000000005L)"
         ));
         assert!(is_true("(set 'x 5L) (-- x 2L) (= x 3L)"));
+    }
+
+    #[test]
+    fn arrays_construct_index_and_convert() {
+        // Cycle-fill and nil-fill (compare via array-list — an array never
+        // equals a list).
+        assert!(is_true("(= (array-list (array 5 '(1 2 3))) '(1 2 3 1 2))"));
+        assert!(is_true("(= (array-list (array 3)) '(nil nil nil))"));
+        // Indexing and length reuse the list paths.
+        assert_eq!(as_int(run("((array 4 '(10 20 30 40)) 2)")), 30);
+        assert_eq!(as_int(run("(length (array 7 '(0)))")), 7);
+        // setf replaces an element in place (fixed length preserved).
+        assert!(is_true(
+            "(set 'a (array 4 '(0))) (setf (a 2) 9) (= (array-list a) '(0 0 9 0))"
+        ));
+        // array-list yields a genuine list.
+        assert!(is_true("(list? (array-list (array 2 '(1))))"));
+    }
+
+    #[test]
+    fn arrays_are_a_distinct_type() {
+        assert!(is_true("(array? (array 2 '(1)))"));
+        assert!(is_true("(not (list? (array 2 '(1))))"));
+        assert!(is_true("(not (array? '(1 2)))"));
+        // Not an atom, like a list.
+        assert!(is_true("(not (atom? (array 2 '(1))))"));
+        // Equal to an array element-wise, never to a list.
+        assert!(is_true("(= (array 2 '(1 2)) (array 2 '(1 2)))"));
+        assert!(is_true("(!= (array 2 '(1 2)) '(1 2))"));
+        // An empty array is falsy.
+        assert_eq!(as_int(run("(if (array 0) 1 2)")), 2);
+    }
+
+    #[test]
+    fn arrays_are_fixed_length() {
+        // Resizing a fixed-length array errors rather than growing it.
+        assert!(matches!(
+            run("(set 'a (array 2 '(1))) (catch (push 9 a) 'e)"),
+            Value::Nil
+        ));
+        // Multi-dimensional construction is deferred (an error for now).
+        assert!(matches!(run("(catch (array 2 3 '(1)) 'e)"), Value::Nil));
     }
 
     #[test]

@@ -86,7 +86,11 @@ pub fn install(interp: &Interp) {
     reg("string?", is_string);
     reg("symbol?", is_symbol);
     reg("list?", is_list);
+    reg("array?", is_array);
+    reg("true?", is_true_p);
     reg("atom?", is_atom);
+    reg("array", b_array);
+    reg("array-list", b_array_list);
     reg("zero?", is_zero);
     reg("empty?", is_empty);
     reg("not", b_not);
@@ -545,6 +549,10 @@ pub fn values_equal(a: &Value, b: &Value) -> bool {
         (Value::List(x), Value::List(y)) => {
             x.len() == y.len() && x.iter().zip(y).all(|(p, q)| values_equal(p, q))
         }
+        // An array equals an array element-wise, but never a list (ADR-0023).
+        (Value::Array(x), Value::Array(y)) => {
+            x.len() == y.len() && x.iter().zip(y).all(|(p, q)| values_equal(p, q))
+        }
         _ => false,
     }
 }
@@ -652,7 +660,7 @@ fn b_cons(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
 
 fn b_first(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
     match args.first() {
-        Some(Value::List(l)) => l
+        Some(Value::List(l)) | Some(Value::Array(l)) => l
             .first()
             .cloned()
             .ok_or_else(|| Signal::error("first: empty list")),
@@ -671,7 +679,7 @@ fn b_rest(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
 
 fn b_last(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
     match args.first() {
-        Some(Value::List(l)) => l
+        Some(Value::List(l)) | Some(Value::Array(l)) => l
             .last()
             .cloned()
             .ok_or_else(|| Signal::error("last: empty list")),
@@ -685,7 +693,7 @@ fn b_nth(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
     }
     let idx = to_i64(&args[0])?;
     match &args[1] {
-        Value::List(l) => {
+        Value::List(l) | Value::Array(l) => {
             let i = if idx < 0 { l.len() as i64 + idx } else { idx };
             if i < 0 || i as usize >= l.len() {
                 Ok(Value::Nil)
@@ -699,7 +707,7 @@ fn b_nth(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
 
 fn b_length(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
     let n = match args.first() {
-        Some(Value::List(l)) => l.len() as i64,
+        Some(Value::List(l)) | Some(Value::Array(l)) => l.len() as i64,
         Some(Value::Str(b)) => b.len() as i64, // bytes, per ADR-0013
         // A bigint's length is its decimal digit count (a newLISP quirk, ADR-0022).
         #[cfg(feature = "bigint")]
@@ -877,7 +885,18 @@ fn is_list(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
     Ok(boolean(matches!(args.first(), Some(Value::List(_)))))
 }
 fn is_atom(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
-    Ok(boolean(!matches!(args.first(), Some(Value::List(_)))))
+    // Neither a list nor an array is an atom (ADR-0023).
+    Ok(boolean(!matches!(
+        args.first(),
+        Some(Value::List(_)) | Some(Value::Array(_))
+    )))
+}
+fn is_array(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    Ok(boolean(matches!(args.first(), Some(Value::Array(_)))))
+}
+/// `(true? x)` — true unless `x` is nil or the empty list/array (newLISP truthiness).
+fn is_true_p(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    Ok(boolean(args.first().is_some_and(|v| v.is_truthy())))
 }
 fn is_zero(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
     #[cfg(feature = "bigint")]
@@ -1571,6 +1590,50 @@ fn b_unique(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
     }
 }
 
+/// `(array size [init])` — a fixed-length array (ADR-0023). With no `init` it is
+/// nil-filled; with an `init` list it is cycle-filled to `size` elements. Leading
+/// integer arguments are dimensions; two or more is an error (multi-dimensional
+/// arrays are deferred).
+fn b_array(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    let mut dims: Vec<i64> = Vec::new();
+    let mut init: Option<&Vec<Value>> = None;
+    let last = args.len().wrapping_sub(1);
+    for (k, a) in args.iter().enumerate() {
+        match a {
+            Value::Int(n) => dims.push(*n),
+            Value::List(l) if k == last => init = Some(l),
+            _ => {
+                return Err(Signal::error(
+                    "array: dimensions must be integers and the optional init a list",
+                ))
+            }
+        }
+    }
+    match dims.len() {
+        0 => return Err(Signal::error("array: expected a size")),
+        1 => {}
+        _ => {
+            return Err(Signal::error(
+                "array: multi-dimensional arrays not yet supported",
+            ))
+        }
+    }
+    let size = dims[0].max(0) as usize;
+    let elems = match init {
+        Some(l) if !l.is_empty() => (0..size).map(|i| l[i % l.len()].clone()).collect(),
+        _ => vec![Value::Nil; size],
+    };
+    Ok(Value::Array(elems))
+}
+
+/// `(array-list arr)` — a plain list copy of an array's elements.
+fn b_array_list(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    match args.first() {
+        Some(Value::Array(a)) => Ok(Value::List(a.clone())),
+        _ => Err(Signal::error("array-list: expected an array")),
+    }
+}
+
 fn b_exit(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
     let code = match args.first() {
         Some(Value::Int(n)) => *n as i32,
@@ -1589,6 +1652,7 @@ fn type_name(v: &Value) -> &'static str {
         Value::Symbol(_) => "symbol",
         Value::Context(_) => "context",
         Value::List(_) => "list",
+        Value::Array(_) => "array",
         Value::Lambda(_) => "lambda",
         Value::Fexpr(_) => "lambda-macro",
         Value::Builtin(_) => "builtin",

@@ -82,3 +82,19 @@ Cross-cutting predicate/equality rules settled alongside:
 - Deferred, tracked for later: the multi-dimensional constructor; wide operation
   acceptance (arrays anywhere lists are accepted); and length-preserving
   destructive ops (`sort`/`reverse`/`rotate`) on arrays.
+
+## Implementation notes
+
+- Two fixes surfaced while making the `qa-factorfibo` sieve run and are folded
+  into this slice: (1) implicit indexing with a **number** in functor position
+  was returning the element instead of the rest/slice newLISP defines — `(2 lst)`
+  is now the tail from offset 2 (element access remains `(lst i)`); (2) the
+  indexed-place guard was cloning the whole container on every `setf` (O(n²) in a
+  mutation loop) and now type-checks by borrow. `true?`, which the sieve's
+  `filter` needs, was also added.
+- `qa-factorfibo` **runs correctly** (verified on small inputs) but is **not
+  wired as an automated test**: its `collect-primes` sieves to 1,000,000, and
+  under the current ORO model a read of a large container variable deep-copies it
+  (`lookup` clones, ADR-0005), making the sieve O(n²). Wiring it waits on the
+  copy-strategy optimisation ([ADR-0016](0016-value-representation-and-copy-strategy.md));
+  this is a performance gate, not a missing feature.

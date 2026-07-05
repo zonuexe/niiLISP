@@ -25,7 +25,8 @@ pub fn to_repr(v: &Value, it: &Interner) -> String {
         Value::Str(bytes) => format!("\"{}\"", String::from_utf8_lossy(bytes)),
         Value::Symbol(id) => it.name(*id).to_string(),
         Value::Context(id) => it.name(*id).to_string(),
-        Value::List(items) => {
+        // An array prints exactly like a list (ADR-0023).
+        Value::List(items) | Value::Array(items) => {
             let mut out = String::from("(");
             for (i, item) in items.iter().enumerate() {
                 if i > 0 {
