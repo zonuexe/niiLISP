@@ -7,10 +7,17 @@
 use std::process::Command;
 
 fn run_qa(name: &str) -> String {
+    run_qa_args(name, &[])
+}
+
+/// Run a vendored qa script with extra command-line arguments (available to the
+/// script via `(main-args)`), returning its stdout.
+fn run_qa_args(name: &str, extra: &[&str]) -> String {
     let bin = env!("CARGO_BIN_EXE_niilisp");
     let path = format!("references/newlisp/qa-specific-tests/{}", name);
     let output = Command::new(bin)
         .arg(&path)
+        .args(extra)
         .output()
         .unwrap_or_else(|e| panic!("failed to launch {}: {}", bin, e));
     String::from_utf8_lossy(&output.stdout).into_owned()
@@ -41,6 +48,35 @@ fn qa_nullstring_passes() {
     assert!(
         stdout.contains("SUCCESS get-string on NULL ptr"),
         "qa-nullstring get-string did not report success:\n{}",
+        stdout
+    );
+}
+
+/// bigint (ADR-0022) plus the helper functions it uses (`seed`/`rand`/`random`/
+/// `amb`/`until`/`extend`/`explode`/`main-args`). The script fuzzes the bigint
+/// operators over `N` random cases; `N` defaults to 100000 but reads a smaller
+/// value from `(main-args -1)`, so a passed argument keeps the test quick while
+/// still exercising every operator.
+#[cfg(feature = "bigint")]
+#[test]
+fn qa_bigint_passes() {
+    let stdout = run_qa_args("qa-bigint", &["300"]);
+    assert!(
+        stdout.contains("big ints tested SUCCESSFUL"),
+        "qa-bigint did not report success:\n{}",
+        stdout
+    );
+}
+
+/// A 1000-digit literal squared and divided back, with a per-digit checksum —
+/// bigint parsing/printing plus `explode`/`chop`.
+#[cfg(feature = "bigint")]
+#[test]
+fn qa_longnum_passes() {
+    let stdout = run_qa("qa-longnum");
+    assert!(
+        stdout.contains("parsing big integers SUCCESSFUL"),
+        "qa-longnum did not report success:\n{}",
         stdout
     );
 }

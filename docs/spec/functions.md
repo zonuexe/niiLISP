@@ -113,6 +113,8 @@ List construction semantics (array-backed values, no dotted pairs) are in
 | `(trim s [l [r]])` | strip a char (default space) from both ends, or `l`/`r` per side |
 | `(slice seq start [len])` | copied sub-range of a string or list (see below) |
 | `(find key seq)` | index of a substring / list element, else `nil` |
+| `(explode seq [n])` | split a string/list into `n`-wide pieces (default 1) |
+| `(chop seq [n])` | copy without the last `n` bytes/elements (default 1) |
 | `(format fmt arg…)` | printf-style: flags, width, `.precision`; `d i u f e g x X o s c` |
 
 `slice` and `find` index strings by **byte** (ADR-0013). In `slice`, a negative
@@ -129,7 +131,15 @@ structurally (`=`).
 | `(print x…)` `(println x…)` | write to stdout (no quotes; `println` adds a newline) |
 | `(time-of-day)` | milliseconds since the epoch |
 | `(set-locale ["C"])` | locale (currently a no-op returning `"C"`) |
+| `(main-args [i])` | the process command line as a list, or its `i`th element |
+| `(seed n)` | reseed the RNG, returning the previous seed |
+| `(rand max [count])` | random integer in `[0, max)`, or a list of `count` |
+| `(random [offset scale [count]])` | uniform float in `[0,1)` or `[offset, offset+scale)` |
 | `(exit [code])` | terminate the process |
+
+The RNG is a seedable xorshift generator shared across `rand`/`random`/`amb`;
+`(random offset scale)` is **uniform** (newLISP's exact distribution is not
+reproduced). `amb` is a special form (see `special-forms.md`).
 
 ## FFI (Unix, `ffi` feature)
 

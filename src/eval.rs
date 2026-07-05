@@ -46,6 +46,10 @@ pub struct Interp {
     /// never holds a dangling function pointer (ADR-0020).
     #[cfg(all(feature = "ffi", unix))]
     callbacks: RefCell<Vec<libffi::middle::Closure<'static>>>,
+    /// xorshift64* state for `rand`/`random`/`amb`, reseedable via `seed`.
+    rng: RefCell<u64>,
+    /// The process command line, for `(main-args)`.
+    main_args: RefCell<Vec<String>>,
 }
 
 /// A dynamic-binding scope. On drop it restores every slot it changed, in
@@ -83,6 +87,17 @@ impl Drop for Scope<'_> {
             }
         }
     }
+}
+
+/// A nonzero starting seed for the RNG, taken from the wall clock so unseeded
+/// runs differ (newLISP seeds from time too); `seed` overrides it.
+fn default_seed() -> u64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0);
+    nanos | 1
 }
 
 /// Increment a numeric place by `sign * delta` for `++`/`--`. Stays in `i64`
@@ -135,10 +150,42 @@ impl Interp {
             libs: RefCell::new(HashMap::new()),
             #[cfg(all(feature = "ffi", unix))]
             callbacks: RefCell::new(Vec::new()),
+            rng: RefCell::new(default_seed()),
+            main_args: RefCell::new(Vec::new()),
         };
         builtins::install(&interp);
         crate::ffi::install(&interp);
         interp
+    }
+
+    /// Record the process command line for `(main-args)`.
+    pub fn set_main_args(&self, args: Vec<String>) {
+        *self.main_args.borrow_mut() = args;
+    }
+
+    /// The recorded command line (`(main-args)`).
+    pub fn main_args(&self) -> Vec<String> {
+        self.main_args.borrow().clone()
+    }
+
+    /// Next 64-bit value from the xorshift64* generator (`rand`/`random`/`amb`).
+    pub fn rng_next_u64(&self) -> u64 {
+        let mut state = self.rng.borrow_mut();
+        let mut x = *state;
+        x ^= x >> 12;
+        x ^= x << 25;
+        x ^= x >> 27;
+        *state = x;
+        x.wrapping_mul(0x2545_F491_4F6C_DD1D)
+    }
+
+    /// Reseed the generator (`seed`), returning the previous seed. A zero seed
+    /// would freeze xorshift, so it is bumped to 1.
+    pub fn rng_seed(&self, seed: u64) -> u64 {
+        let mut state = self.rng.borrow_mut();
+        let prev = *state;
+        *state = if seed == 0 { 1 } else { seed };
+        prev
     }
 
     /// Register a primitive under `name`. Used by the FFI module (ADR-0019).
@@ -460,6 +507,9 @@ impl Interp {
             "for" => self.sf_for(args),
             "dolist" => self.sf_dolist(args),
             "dostring" => self.sf_dostring(args),
+            "until" => self.sf_until(args),
+            "amb" => self.sf_amb(args),
+            "extend" => self.sf_extend(args),
             "local" => self.sf_local(args),
             "++" | "inc" => self.sf_incr(args, 1),
             "--" | "dec" => self.sf_incr(args, -1),
@@ -592,6 +642,74 @@ impl Interp {
             result = self.eval_body(&args[1..])?;
         }
         Ok(result)
+    }
+
+    fn sf_until(&self, args: &[Value]) -> Result<Value, Signal> {
+        // (until cond body...) — the inverse of `while`: loop while cond is false.
+        let cond = args
+            .first()
+            .ok_or_else(|| Signal::error("until: missing condition"))?;
+        let mut result = Value::Nil;
+        while !self.eval(cond)?.is_truthy() {
+            result = self.eval_body(&args[1..])?;
+        }
+        Ok(result)
+    }
+
+    fn sf_amb(&self, args: &[Value]) -> Result<Value, Signal> {
+        // (amb expr...) — evaluate exactly one argument, chosen at random.
+        if args.is_empty() {
+            return Ok(Value::Nil);
+        }
+        let idx = (self.rng_next_u64() % args.len() as u64) as usize;
+        self.eval(&args[idx])
+    }
+
+    fn sf_extend(&self, args: &[Value]) -> Result<Value, Signal> {
+        // (extend place rest...) — destructively append to a string or list
+        // place: strings concatenate, lists splice each argument's elements.
+        let place = self.resolve_place(
+            args.first()
+                .ok_or_else(|| Signal::error("extend: expected a place"))?,
+        )?;
+        let mut additions = Vec::with_capacity(args.len().saturating_sub(1));
+        for e in &args[1..] {
+            additions.push(self.eval(e)?);
+        }
+        self.with_place_mut(&place, move |loc| {
+            // An unset place adopts a string if every addition is a string.
+            if matches!(loc, Value::Nil) {
+                *loc = if additions.iter().all(|a| matches!(a, Value::Str(_))) {
+                    Value::Str(Vec::new())
+                } else {
+                    Value::List(Vec::new())
+                };
+            }
+            match loc {
+                Value::Str(buf) => {
+                    for a in &additions {
+                        match a {
+                            Value::Str(b) => buf.extend_from_slice(b),
+                            _ => {
+                                return Err(Signal::error(
+                                    "extend: a string place takes string arguments",
+                                ))
+                            }
+                        }
+                    }
+                }
+                Value::List(list) => {
+                    for a in &additions {
+                        match a {
+                            Value::List(items) => list.extend(items.iter().cloned()),
+                            other => list.push(other.clone()),
+                        }
+                    }
+                }
+                _ => return Err(Signal::error("extend: place is not a string or list")),
+            }
+            Ok(loc.clone())
+        })
     }
 
     fn sf_when(&self, args: &[Value], positive: bool) -> Result<Value, Signal> {
@@ -2155,6 +2273,37 @@ mod tests {
             "(set 'x 100000000000000000000L) (++ x 5) (= x 100000000000000000005L)"
         ));
         assert!(is_true("(set 'x 5L) (-- x 2L) (= x 3L)"));
+    }
+
+    #[test]
+    fn explode_chop_and_digit_sum() {
+        assert!(is_true("(= (explode \"abc\") '(\"a\" \"b\" \"c\"))"));
+        assert!(is_true("(= (explode \"abcd\" 2) '(\"ab\" \"cd\"))"));
+        assert_eq!(as_str(run("(chop \"hello\")")), "hell");
+        assert_eq!(as_str(run("(chop \"hello\" 3)")), "he");
+        // The qa-longnum idiom: sum the digits of a number's string.
+        assert_eq!(as_int(run("(apply + (map int (explode \"12345\")))")), 15);
+    }
+
+    #[test]
+    fn until_loop_and_extend_place() {
+        assert_eq!(as_int(run("(set 'i 0) (until (= i 5) (++ i)) i")), 5);
+        assert_eq!(
+            as_str(run("(set 's \"\") (extend s \"ab\" \"cd\") s")),
+            "abcd"
+        );
+        assert!(is_true(
+            "(set 'l '(1 2)) (extend l '(3 4)) (= l '(1 2 3 4))"
+        ));
+    }
+
+    #[test]
+    fn seed_makes_rng_deterministic() {
+        // The same seed yields the same draw; `rand` stays within range.
+        assert!(is_true(
+            "(= (begin (seed 7) (rand 1000000)) (begin (seed 7) (rand 1000000)))"
+        ));
+        assert!(is_true("(seed 1) (and (>= (rand 10) 0) (< (rand 10) 10))"));
     }
 
     #[test]

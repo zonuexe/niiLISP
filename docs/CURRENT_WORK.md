@@ -16,37 +16,52 @@ what is deliberately deferred, so work can resume without re-deriving context.
   (arbitrary-precision integers, ADR-0022); `case`/`if-not` promoted to full
   special forms; a language spec under [`docs/spec/`](spec/) (syntax, types,
   special-forms, functions).
-- Tests: 44 unit + 5 integration (`qa-exception`, `qa-foop`, `qa-nullstring`,
-  and two hermetic `ffi` tests); the suite passes under both default features
-  and `--no-default-features`.
+- Tests: 47 unit + 7 integration (`qa-exception`, `qa-foop`, `qa-nullstring`,
+  `qa-bigint`, `qa-longnum`, and two hermetic `ffi` tests); the suite passes
+  under both default features and `--no-default-features`.
 - Standard-library fill-ins (byte-based, no UTF-8 dependency): string builtins
-  `upper-case`/`lower-case`/`trim`/`slice`/`find` and the `dostring` special
-  form — part of the `qa-ref` tail.
+  `upper-case`/`lower-case`/`trim`/`slice`/`find`/`explode`/`chop`, the RNG
+  (`seed`/`rand`/`random`/`amb`), `main-args`, and the `dostring`/`until`/`extend`
+  special forms — closing the `qa-bigint`/`qa-longnum` helper gap.
 
-## Next task — pick up here: qa-bigint / qa-longnum helper functions
+## Next task — pick up here: choose the next slice
 
-**bigint itself is done** ([ADR-0022](adr/0022-bigint-numeric-tower-slice.md) —
-see the recap below). To actually turn on the `qa-bigint` / `qa-longnum`
-integration targets, implement the **non-bigint helper functions they also
-use** — none need a new ADR, they are ordinary builtins:
+The FFI and bigint arcs are complete and their qa targets pass. Pick the next
+piece; the roadmap below has the full list. Leading candidates:
 
-- **RNG family** — `seed`, `random`, `rand`, `amb`. `qa-bigint` seeds and draws
-  random numbers to fuzz the bigint operators. Needs a deterministic seedable
-  PRNG (a small xorshift/PCG is fine); decide whether `seed` fixes a global
-  generator. This is the biggest piece.
-- **String/list helpers** — `explode` (string → list of 1-char strings, or list
-  chunking), `chop` (drop the last element/char), `extend` (destructive append),
-  `primes` (or the test's own definition), `main-args`.
-- **`until`** loop special form (inverse of `while`), mirroring `while`.
+- **`qa-factorfibo` tail** — the closest remaining qa target. It needs `primes`
+  (a sieve builtin) and uses the bigint machinery already in place; check the
+  script for any other gap (`push … -1`, `dup`, etc. already exist). No ADR
+  needed — `primes` is an ordinary builtin.
+- **qa-ref tail** — context-as-hash, string-byte places (`(setf (s 3) "D")`),
+  and `eval`/loop place-returns. Touches the place model; scope it first.
+- **Contexts as namespaces/dictionaries** or **UTF-8 char ops**
+  ([ADR-0013](adr/0013-string-representation-and-unicode.md)) — each wants its
+  own grilled ADR before implementation.
 
-Then wire `qa-bigint` / `qa-longnum` into `tests/qa.rs`. Check each script for
-the full set of functions it references before starting — the lists above come
-from a read of the two scripts but may miss a helper.
-
-Alternatively pick a different roadmap item below (contexts-as-dictionaries,
-UTF-8 char ops) — each of those wants its own ADR first.
+Note the RNG distribution for `(random offset scale)` is **uniform**, not
+newLISP's; fine for `qa-bigint` (invariant-based) but revisit if a future script
+depends on the exact distribution.
 
 ## Done since v0.1.0
+
+**qa-bigint / qa-longnum helpers**: a seedable xorshift RNG (`seed`/`rand`/
+`random`/`amb`), the `until` loop, `extend` (destructive place append),
+`explode`/`chop`, and `main-args`. `qa-bigint` (scaled down via `(main-args -1)`
+to keep the test fast) and `qa-longnum` are wired into `tests/qa.rs`.
+
+**bigint** ([ADR-0022](adr/0022-bigint-numeric-tower-slice.md)): `Value::Bigint`
+behind a default-on `bigint` feature over `num-bigint`; over-long / `L`-suffixed
+decimal literals promote; `+ - * / %` compute in arbitrary precision when an
+operand is a bigint (floats truncated, no auto-demote); cross-type compare,
+`zero?`/`abs`/`length`(digit count), `bigint`/`int`/`float` conversions, and
+`gcd`. The variant is `#[cfg]`-gated so `--no-default-features` compiles it out
+and the literals revert to a read error.
+
+The **FFI memory API slice is done** ([ADR-0021](adr/0021-ffi-memory-api-slice.md)):
+`struct`, `pack`/`unpack` (native C ABI layout), `get-string`/`get-int`/
+`get-long`/`get-float` (a C double)/`get-char`, and `address` (symbol-held
+strings only), plus `import`'s `void*` argument now accepts a string (passes its
 
 **bigint** ([ADR-0022](adr/0022-bigint-numeric-tower-slice.md)): `Value::Bigint`
 behind a default-on `bigint` feature over `num-bigint`; over-long / `L`-suffixed
@@ -73,10 +88,10 @@ is closed.
 
 Other slices on deck (bigint is the active task, above):
 
-- **bigint** — **done** ([ADR-0022](adr/0022-bigint-numeric-tower-slice.md)).
-  Unlocked the numeric core of `qa-bigint`, `qa-longnum`, and the tail of
-  `qa-factorfibo`; each still needs the separate helper functions in the next
-  task above before its script passes end to end.
+- **bigint** — **done** ([ADR-0022](adr/0022-bigint-numeric-tower-slice.md)),
+  and `qa-bigint` / `qa-longnum` now pass and are wired into `tests/qa.rs` (their
+  RNG / string helpers landed too). `qa-factorfibo`'s bigint tail still needs a
+  `primes` sieve builtin.
 - **`address` of scalars / write-through** — `address` today only exposes a
   symbol-held *string* buffer. Symbol-held numbers have no separate buffer under
   the current value model; revisit if a test needs write-through to a scalar.

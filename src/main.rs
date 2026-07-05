@@ -42,6 +42,7 @@ OPTIONS:
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().collect();
     let interp = Interp::new();
+    interp.set_main_args(args.clone());
 
     match args.get(1).map(String::as_str) {
         None => {

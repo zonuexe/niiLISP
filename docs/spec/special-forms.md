@@ -277,6 +277,15 @@ Binds `var` to each byte of `str` as an integer (0–255) — characters are byt
 in the current model (ADR-0013). Like `dolist`, a truthy `break` expression
 stops the loop before running `body` for that byte.
 
+### `until` — loop while false
+
+```
+(until cond body)
+```
+
+The inverse of `while`: evaluates `body` while `cond` is false, checking `cond`
+first. Returns the last `body` result (or `nil` if it never runs).
+
 ### `dotimes` — count
 
 ```
@@ -284,6 +293,26 @@ stops the loop before running `body` for that byte.
 ```
 
 Binds `var` to `0 … count-1`.
+
+### `amb` — random choice
+
+```
+(amb expr…)
+```
+
+Evaluates exactly one of its arguments, chosen at random, and returns its value
+(`nil` with no arguments). The unchosen arguments are not evaluated. Uses the
+shared seedable RNG (`seed`).
+
+### `extend` — append to a place
+
+```
+(extend place rest…)
+```
+
+Destructively appends to the string or list held in `place` and returns the new
+value: strings concatenate, lists splice each argument's elements. An unset
+(`nil`) place becomes a string when every argument is a string, else a list.
 
 ---
 

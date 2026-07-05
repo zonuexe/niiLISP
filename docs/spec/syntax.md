@@ -242,6 +242,7 @@ fexpr, not a hygienic macro); it decides what to evaluate:
 
 ```
 (while cond body)
+(until cond body)                     ; inverse of while
 (for (var from to [step]) body)      ; inclusive; direction auto by from/to
 (dolist (var list [break]) body)
 (dostring (var str [break]) body)   ; var := each byte value (0–255)
@@ -399,10 +400,12 @@ list see [`functions.md`](functions.md).
   `map apply filter sequence dup`.
 - **Predicates**: `nil? null? true? integer? float? number? string? symbol?
   list? atom? zero? empty? NaN? inf?`.
-- **Strings**: `string starts-with ends-with char upper-case lower-case trim
-  slice find`, `format` (printf subset:
-  flags, width, `.precision`, and `d i u f e g x X o s c`).
-- **I/O / misc**: `print println`, `time-of-day`, `set-locale`, `exit`, `eval`,
+- **Strings / sequences**: `string starts-with ends-with char upper-case
+  lower-case trim slice find explode chop`, `format` (printf subset: flags,
+  width, `.precision`, and `d i u f e g x X o s c`).
+- **Random**: `seed rand random amb` (a shared seedable generator).
+- **I/O / misc**: `print println`, `time-of-day`, `set-locale`, `main-args`,
+  `exit`, `eval`,
   `new`.
 
 ---

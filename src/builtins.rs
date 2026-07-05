@@ -110,6 +110,13 @@ pub fn install(interp: &Interp) {
     reg("trim", b_trim);
     reg("slice", b_slice);
     reg("find", b_find);
+    reg("chop", b_chop);
+    reg("explode", b_explode);
+    // RNG and process environment.
+    reg("seed", b_seed);
+    reg("rand", b_rand);
+    reg("random", b_random);
+    reg("main-args", b_main_args);
     reg("set-locale", |_, _| Ok(Value::Str(b"C".to_vec())));
     reg("print", b_print);
     reg("println", b_println);
@@ -1311,6 +1318,106 @@ fn b_find(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
         },
         _ => Err(Signal::error(
             "find: expected a string in a string, or an item in a list",
+        )),
+    }
+}
+
+/// `(chop seq [n])` — a copy of a string or list without its last `n` (default
+/// 1) bytes / elements.
+fn b_chop(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    let n = match args.get(1) {
+        Some(v) => to_i64(v)?.max(0) as usize,
+        None => 1,
+    };
+    match args.first() {
+        Some(Value::Str(b)) => Ok(Value::Str(b[..b.len().saturating_sub(n)].to_vec())),
+        Some(Value::List(l)) => Ok(Value::List(l[..l.len().saturating_sub(n)].to_vec())),
+        Some(Value::Nil) | None => Ok(Value::Nil),
+        _ => Err(Signal::error("chop: expected a string or list")),
+    }
+}
+
+/// `(explode seq [n])` — split a string (by byte) or list into a list of `n`-wide
+/// pieces (default 1). `(explode "abc")` -> `("a" "b" "c")`.
+fn b_explode(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    let n = match args.get(1) {
+        Some(v) => to_i64(v)?.max(1) as usize,
+        None => 1,
+    };
+    match args.first() {
+        Some(Value::Str(b)) => Ok(Value::List(
+            b.chunks(n).map(|c| Value::Str(c.to_vec())).collect(),
+        )),
+        Some(Value::List(l)) => Ok(Value::List(
+            l.chunks(n).map(|c| Value::List(c.to_vec())).collect(),
+        )),
+        Some(Value::Nil) | None => Ok(Value::List(Vec::new())),
+        _ => Err(Signal::error("explode: expected a string or list")),
+    }
+}
+
+/// `(main-args)` — the process command line as a list of strings; `(main-args i)`
+/// returns the `i`th (a negative `i` counts from the end), else `nil`.
+fn b_main_args(interp: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    let all = interp.main_args();
+    match args.first() {
+        None => Ok(Value::List(
+            all.into_iter()
+                .map(|s| Value::Str(s.into_bytes()))
+                .collect(),
+        )),
+        Some(v) => {
+            let i = to_i64(v)?;
+            let idx = if i < 0 { all.len() as i64 + i } else { i };
+            match usize::try_from(idx).ok().and_then(|k| all.get(k)) {
+                Some(s) => Ok(Value::Str(s.clone().into_bytes())),
+                None => Ok(Value::Nil),
+            }
+        }
+    }
+}
+
+/// `(seed n)` — reseed the RNG, returning the previous seed.
+fn b_seed(interp: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    let n = to_i64(args.first().unwrap_or(&Value::Nil))?;
+    Ok(Value::Int(interp.rng_seed(n as u64) as i64))
+}
+
+/// `(rand max [count])` — a random integer in `[0, max)`, or a list of `count`.
+fn b_rand(interp: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    let max = to_i64(args.first().unwrap_or(&Value::Nil))?;
+    if max <= 0 {
+        return Ok(Value::Int(0));
+    }
+    let m = max as u64;
+    let draw = |i: &Interp| Value::Int((i.rng_next_u64() % m) as i64);
+    match args.get(1) {
+        Some(cnt) => {
+            let n = to_i64(cnt)?.max(0) as usize;
+            Ok(Value::List((0..n).map(|_| draw(interp)).collect()))
+        }
+        None => Ok(draw(interp)),
+    }
+}
+
+/// `(random)` — a uniform float in `[0, 1)`; `(random offset scale [count])` — a
+/// uniform float in `[offset, offset+scale)`, or a list of `count` of them.
+fn b_random(interp: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    let uni = |i: &Interp| i.rng_next_u64() as f64 / (u64::MAX as f64 + 1.0);
+    match (args.first(), args.get(1), args.get(2)) {
+        (None, _, _) => Ok(Value::Float(uni(interp))),
+        (Some(off), Some(scale), None) => {
+            Ok(Value::Float(to_f64(off)? + to_f64(scale)? * uni(interp)))
+        }
+        (Some(off), Some(scale), Some(cnt)) => {
+            let (o, s) = (to_f64(off)?, to_f64(scale)?);
+            let n = to_i64(cnt)?.max(0) as usize;
+            Ok(Value::List(
+                (0..n).map(|_| Value::Float(o + s * uni(interp))).collect(),
+            ))
+        }
+        (Some(_), None, _) => Err(Signal::error(
+            "random: expected (random) or (random offset scale [count])",
         )),
     }
 }
