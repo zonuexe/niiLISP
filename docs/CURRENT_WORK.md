@@ -10,7 +10,44 @@ what is deliberately deferred, so work can resume without re-deriving context.
 - Working: reader, tree-walking evaluator, dynamic scope + contexts, ORO value
   semantics, FOOP with reference `self`, the reference/place model, `catch`/`throw`,
   and a core builtin set. Passes vendored `qa-exception` and `qa-foop`.
-- Tests: 30 unit + 2 integration.
+- Since v0.1.0 (all on `master`, unreleased): **FFI `import`** (typed C calls,
+  ADR-0018/0019) and **`callback`** (ADR-0020); `case`/`if-not` promoted to full
+  special forms; a language spec under [`docs/spec/`](spec/) (syntax, types,
+  special-forms, functions).
+- Tests: 31 unit + 3 integration (`qa-exception`, `qa-foop`, hermetic `ffi`).
+
+## Next task — pick up here: FFI memory API slice
+
+**Design is done ([ADR-0021](adr/0021-ffi-memory-api-slice.md)); implement it.**
+This is the third FFI slice; acceptance target is the vendored `qa-nullstring`.
+Build on the existing FFI module (`src/ffi.rs`, gated `cfg(all(feature = "ffi",
+unix))`), which already has `CType`, the `import` marshalling, and `callback`.
+
+Implement these builtins (all `cfg(all(feature = "ffi", unix))`):
+
+- **`struct`** — `(struct 'name t…)` binds `name` to a list of C type names
+  (reuse `CType`; a struct is just a list of type strings, no new value type).
+- **`pack` / `unpack`** — `(pack layout val…)` -> a binary string; `(unpack
+  layout str)` -> a list. Use the **native C ABI layout** (natural alignment +
+  padding + native endianness), so packed bytes match a real C struct. Compute
+  per-field offsets from each `CType`'s size/align.
+- **`get-string` / `get-int` / `get-long` / `get-float` / `get-char`** — read a C
+  value at an integer address. **Check address 0 -> error** ("cannot convert NULL
+  to string"); other invalid addresses are UB (accepted, ADR-0015).
+- **`address`** — `(address 'sym)` returns the stable buffer address of a
+  **symbol-held** value. Reject `address` of an arbitrary temporary (dangles
+  under ORO). Invariant: caller must not resize/reassign while C holds it.
+- Extend `import`'s **`void*` argument to accept a string** and pass its buffer
+  pointer directly (no copy, binary-safe), valid for the call's duration — this
+  is how a packed struct is handed to C.
+
+Then: a hermetic test (pack a struct, pass via `void*`, read back), and wire
+`qa-nullstring` into `tests/qa.rs` once it passes (it also needs `struct`/`pack`/
+`unpack`/`get-string` — check what else it references).
+
+**Gotcha (cost time this session):** cargo's incremental build went stale and
+silently reused an old binary, masking a compile error. If a change seems to have
+no effect, run `cargo clean -p niilisp` and confirm you see `Compiling niilisp`.
 
 ## Deferred optimizations (do after the language surface is more complete)
 
@@ -39,12 +76,13 @@ integration targets unlocked as their dependencies land.
 - **qa-ref tail** — remaining reference-model features: context-as-hash,
   string-byte places (`(setf (s 3) "D")`), `eval`/loop place-returns,
   `upper-case`, `dostring`.
-- **`import` / FFI** (v2 headline, [ADR-0015](adr/0015-import-ffi.md)) — first slice
-  **done**: typed `import` of scalar/string/pointer C functions (Unix, system
-  libffi; [ADR-0018](adr/0018-ffi-build-and-packaging.md)/[0019](adr/0019-ffi-first-slice.md)).
-  Next FFI slices: `callback` (libffi closures), the memory API
-  (`pack`/`unpack`/`get-*`/`struct`), simple/untyped `import`, and Windows FFI.
-  `qa-libffi`/`qa-nullstring` also need `exec`/`real-path` and the memory API.
+- **`import` / FFI** (v2 headline, [ADR-0015](adr/0015-import-ffi.md)) — **done**:
+  typed `import` ([ADR-0019](adr/0019-ffi-first-slice.md)) and `callback`
+  ([ADR-0020](adr/0020-ffi-callback-slice.md)), Unix + system libffi
+  ([ADR-0018](adr/0018-ffi-build-and-packaging.md)). **Next: the memory API slice**
+  — designed in [ADR-0021](adr/0021-ffi-memory-api-slice.md), see the handoff at
+  the top. Later FFI slices: the terse `pack` format-char language, simple/untyped
+  `import`, and Windows FFI. `qa-libffi` additionally needs `exec`/`real-path`.
 - **bigint** — `L` literals + `Value::Bigint`; unlocks `qa-bigint`, `qa-longnum`,
   and the tail of `qa-factorfibo`.
 - **Contexts as namespaces/dictionaries** — beyond FOOP; unlocks `qa-dictionary`.
