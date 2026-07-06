@@ -271,6 +271,22 @@ fn qa_pipefork_passes() {
     );
 }
 
+/// The message API (ADR-0032): `send`/`receive` over per-child datagram
+/// socketpairs — a status phase (children stream numbers to the parent), a
+/// round-trip phase, and a proxy phase where the parent `eval`s received code
+/// to relay A→B. `mt`-gated. (qa-msgbig additionally needs `base64-enc` and
+/// stream framing for its 80 KB messages, so it is not wired.)
+#[cfg(all(feature = "mt", unix))]
+#[test]
+fn qa_message_passes() {
+    let stdout = run_qa("qa-message");
+    assert!(
+        stdout.contains("Message API tested SUCCESSFUL"),
+        "qa-message did not pass:\n{}",
+        stdout
+    );
+}
+
 #[test]
 fn qa_foop_passes() {
     let stdout = run_qa("qa-foop");

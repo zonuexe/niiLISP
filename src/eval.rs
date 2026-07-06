@@ -91,6 +91,7 @@ pub const SPECIAL_FORMS: &[&str] = &[
     // arms are `mt`-gated, so a call is a plain error in a non-`mt` build.
     "spawn",
     "fork",
+    "receive",
 ];
 
 /// The interpreter state. Methods take `&self`; mutable state lives behind
@@ -949,9 +950,40 @@ impl Interp {
             "spawn" => crate::process::sf_spawn(self, args),
             #[cfg(all(feature = "mt", unix))]
             "fork" => crate::process::sf_fork(self, args),
+            #[cfg(all(feature = "mt", unix))]
+            "receive" => self.sf_receive(args),
             _ => return None,
         };
         Some(r)
+    }
+
+    /// `(receive)` returns the peer pids with a message ready; `(receive pid
+    /// place)` reads one message from `pid` into `place` (unevaluated, hence a
+    /// special form), returning `true`, or `nil` if none is waiting (ADR-0032).
+    #[cfg(all(feature = "mt", unix))]
+    fn sf_receive(&self, args: &[Value]) -> Result<Value, Signal> {
+        if args.is_empty() {
+            return Ok(Value::list(crate::process::receive_ready(self)));
+        }
+        let pid = match self.eval(&args[0])? {
+            Value::Int(n) => n,
+            Value::Float(f) => f as i64,
+            _ => return Err(Signal::error("receive: pid must be an integer")),
+        };
+        let place = self.resolve_place(
+            args.get(1)
+                .ok_or_else(|| Signal::error("receive: missing target place"))?,
+        )?;
+        match crate::process::receive_one(self, pid) {
+            Some(v) => {
+                self.with_place_mut(&place, move |loc| {
+                    *loc = v;
+                    Ok(Value::Nil)
+                })?;
+                Ok(Value::True)
+            }
+            None => Ok(Value::Nil),
+        }
     }
 
     /// `(read-buffer handle place size [wait-str])` — reads up to `size` bytes

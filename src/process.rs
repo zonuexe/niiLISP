@@ -126,6 +126,8 @@ pub fn install(interp: &Interp) {
         interp.register_builtin("share", cilk::b_share);
         interp.register_builtin("pipe", cilk::b_pipe);
         interp.register_builtin("wait-pid", cilk::b_wait_pid);
+        interp.register_builtin("send", cilk::b_send);
+        // `receive` is a place-taking special form (see `try_special_form`).
         // `spawn` is a special form (its expression runs in the child) — see
         // `try_special_form` / `cilk::sf_spawn`.
     }
@@ -140,11 +142,15 @@ pub struct CilkState {
     spawns: Vec<cilk::SpawnEntry>,
     #[cfg(all(feature = "mt", unix))]
     pages: Vec<cilk::SharePage>,
+    /// Message channels: for each peer process (a child in the parent, the
+    /// parent in a child), the non-blocking datagram socket to it (ADR-0032).
+    #[cfg(all(feature = "mt", unix))]
+    channels: Vec<(libc::pid_t, i32)>,
 }
 
 /// `spawn`/`sync`/`abort`, forking the interpreter (ADR-0032).
 #[cfg(all(feature = "mt", unix))]
-pub use cilk::{sf_fork, sf_spawn};
+pub use cilk::{receive_one, receive_ready, sf_fork, sf_spawn};
 
 #[cfg(all(feature = "mt", unix))]
 mod cilk {
@@ -261,12 +267,29 @@ mod cilk {
             _ => return Err(Signal::error("spawn: first argument must be a symbol")),
         };
         let body = args.get(1).cloned().unwrap_or(Value::Nil);
+        // A truthy third argument enables the send/receive message channel.
+        let message = match args.get(2) {
+            Some(e) => interp.eval(e)?.is_truthy(),
+            None => false,
+        };
 
-        let mut fds = [0i32; 2];
-        if unsafe { libc::pipe(fds.as_mut_ptr()) } != 0 {
+        let mut pipe_fds = [0i32; 2];
+        if unsafe { libc::pipe(pipe_fds.as_mut_ptr()) } != 0 {
             return Ok(Value::Nil);
         }
-        let (read_fd, write_fd) = (fds[0], fds[1]);
+        let (read_fd, write_fd) = (pipe_fds[0], pipe_fds[1]);
+
+        // A non-blocking datagram socketpair for messages, if requested.
+        let mut sv = [0i32; 2];
+        if message
+            && unsafe { libc::socketpair(libc::AF_UNIX, libc::SOCK_DGRAM, 0, sv.as_mut_ptr()) } != 0
+        {
+            unsafe {
+                libc::close(read_fd);
+                libc::close(write_fd);
+            }
+            return Ok(Value::Nil);
+        }
 
         use std::io::Write;
         let _ = std::io::stdout().flush();
@@ -275,12 +298,27 @@ mod cilk {
             unsafe {
                 libc::close(read_fd);
                 libc::close(write_fd);
+                if message {
+                    libc::close(sv[0]);
+                    libc::close(sv[1]);
+                }
             }
             return Ok(Value::Nil);
         }
         if pid == 0 {
-            // Child: it manages its own (recursive) spawns, not the parent's.
-            interp.cilk().borrow_mut().spawns.clear();
+            // Child: it manages its own (recursive) spawns and channels.
+            {
+                let mut state = interp.cilk().borrow_mut();
+                state.spawns.clear();
+                state.channels.clear();
+                if message {
+                    unsafe {
+                        libc::close(sv[0]);
+                        set_nonblocking(sv[1]);
+                    }
+                    state.channels.push((unsafe { libc::getppid() }, sv[1]));
+                }
+            }
             unsafe { libc::close(read_fd) };
             let result = interp.eval(&body).unwrap_or(Value::Nil);
             let bytes = interp.repr(&result).into_bytes();
@@ -304,12 +342,116 @@ mod cilk {
         }
         // Parent.
         unsafe { libc::close(write_fd) };
-        interp
-            .cilk()
-            .borrow_mut()
-            .spawns
-            .push(SpawnEntry { pid, sym, read_fd });
+        let mut state = interp.cilk().borrow_mut();
+        state.spawns.push(SpawnEntry { pid, sym, read_fd });
+        if message {
+            unsafe {
+                libc::close(sv[1]);
+                set_nonblocking(sv[0]);
+            }
+            state.channels.push((pid, sv[0]));
+        }
         Ok(Value::Int(pid as i64))
+    }
+
+    unsafe fn set_nonblocking(fd: i32) {
+        let flags = libc::fcntl(fd, libc::F_GETFL, 0);
+        libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK);
+        // Widen the socket buffers so larger datagrams fit (a SOCK_DGRAM message
+        // must fit the buffer). Very large messages (qa-msgbig's 80 KB) still
+        // exceed this and would need stream framing — deferred.
+        let sz: libc::c_int = 262_144;
+        libc::setsockopt(
+            fd,
+            libc::SOL_SOCKET,
+            libc::SO_SNDBUF,
+            &sz as *const _ as *const libc::c_void,
+            std::mem::size_of::<libc::c_int>() as libc::socklen_t,
+        );
+        libc::setsockopt(
+            fd,
+            libc::SOL_SOCKET,
+            libc::SO_RCVBUF,
+            &sz as *const _ as *const libc::c_void,
+            std::mem::size_of::<libc::c_int>() as libc::socklen_t,
+        );
+    }
+
+    /// `(send pid msg)` — send `msg` (as its `repr`) as one datagram to the peer
+    /// `pid`; `true` on success, `nil` if the buffer is full (the caller retries)
+    /// or there is no such peer.
+    pub fn b_send(interp: &Interp, args: &[Value]) -> Result<Value, Signal> {
+        let pid = to_i64(args.first().unwrap_or(&Value::Nil)) as libc::pid_t;
+        let msg = args.get(1).cloned().unwrap_or(Value::Nil);
+        let fd = interp
+            .cilk()
+            .borrow()
+            .channels
+            .iter()
+            .find(|(p, _)| *p == pid)
+            .map(|(_, fd)| *fd);
+        let fd = match fd {
+            Some(fd) => fd,
+            None => return Ok(Value::Nil),
+        };
+        let bytes = interp.repr(&msg).into_bytes();
+        let n = unsafe {
+            libc::send(
+                fd,
+                bytes.as_ptr() as *const libc::c_void,
+                bytes.len(),
+                libc::MSG_DONTWAIT,
+            )
+        };
+        Ok(if n == bytes.len() as isize {
+            Value::True
+        } else {
+            Value::Nil
+        })
+    }
+
+    /// `(receive)` — the peer pids with a datagram ready to read.
+    pub fn receive_ready(interp: &Interp) -> Vec<Value> {
+        let channels = interp.cilk().borrow().channels.clone();
+        let mut ready = Vec::new();
+        for (pid, fd) in channels {
+            let mut pfd = libc::pollfd {
+                fd,
+                events: libc::POLLIN,
+                revents: 0,
+            };
+            if unsafe { libc::poll(&mut pfd, 1, 0) } > 0 && pfd.revents & libc::POLLIN != 0 {
+                ready.push(Value::Int(pid as i64));
+            }
+        }
+        ready
+    }
+
+    /// Read one datagram from peer `pid` (non-blocking); `None` if no peer or no
+    /// message is waiting. The `receive` special form binds the value to a place.
+    pub fn receive_one(interp: &Interp, pid: i64) -> Option<Value> {
+        let pid = pid as libc::pid_t;
+        let fd = interp
+            .cilk()
+            .borrow()
+            .channels
+            .iter()
+            .find(|(p, _)| *p == pid)
+            .map(|(_, fd)| *fd)?;
+        let mut buf = vec![0u8; 65536];
+        let n = unsafe {
+            libc::recv(
+                fd,
+                buf.as_mut_ptr() as *mut libc::c_void,
+                buf.len(),
+                libc::MSG_DONTWAIT,
+            )
+        };
+        if n <= 0 {
+            return None;
+        }
+        buf.truncate(n as usize);
+        Some(interp.read_one(&buf))
     }
 
     /// `(fork expr)` — fork; the child evaluates `expr` and `_exit`s (no result
@@ -464,11 +606,17 @@ mod cilk {
         }
         let killed: std::collections::HashSet<libc::pid_t> =
             targets.iter().map(|(p, _)| *p).collect();
-        interp
-            .cilk()
-            .borrow_mut()
-            .spawns
-            .retain(|e| !killed.contains(&e.pid));
+        let mut state = interp.cilk().borrow_mut();
+        state.spawns.retain(|e| !killed.contains(&e.pid));
+        // Drop and close any message channels to the killed children.
+        state.channels.retain(|(pid, fd)| {
+            if killed.contains(pid) {
+                unsafe { libc::close(*fd) };
+                false
+            } else {
+                true
+            }
+        });
         Ok(Value::True)
     }
 }

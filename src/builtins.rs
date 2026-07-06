@@ -1481,6 +1481,17 @@ fn b_sys_info(i: &Interp, args: &[Value]) -> Result<Value, Signal> {
     match args.first() {
         Some(v) => {
             let n = to_i64(v)?;
+            // Negative indices name process ids (the Cilk API uses them):
+            // -3 = this process, -4 = the parent process.
+            if n == -3 {
+                return Ok(Value::Int(i64::from(std::process::id())));
+            }
+            if n == -4 {
+                #[cfg(all(feature = "mt", unix))]
+                return Ok(Value::Int(i64::from(unsafe { libc::getppid() })));
+                #[cfg(not(all(feature = "mt", unix)))]
+                return Ok(Value::Int(0));
+            }
             Ok(usize::try_from(n)
                 .ok()
                 .and_then(|k| info.get(k))
