@@ -62,14 +62,15 @@ dictionaries (ADR-0030, `qa-dictionary` passes and is wired), **external process
 **binary-safe string repr** (ADR-0032 prerequisite — `save`/`source`/REPL now
 round-trip binary strings). Candidates, roughly by value:
 
-- **Cilk / fork multitasking** (ADR-0032, **designed, not yet implemented**) —
-  `spawn`/`sync`/`abort`/`share`/`send`/`receive`, raw `fork`/`pipe`/`wait-pid`,
-  `signal`. Real Unix `fork()` of the interpreter behind a default-on `mt` feature
-  (new `libc` dep), bounded unsafe; cross-process values transfer as re-readable
-  `repr` read as data. Implement in dependency-first sub-slices: **B1** spawn/sync/
-  abort → `qa-cilk`; **B2** `share` → `qa-share`; **B3** raw fork/pipe/wait-pid →
-  `qa-pipe`/`qa-pipefork`; **B4** send/receive → `qa-message`; **B5** signal+exec →
-  `qa-siguser`. (`sys-info -3`/`-4` = this/parent pid needed for B4.)
+- **Cilk / fork multitasking** (ADR-0032) — real Unix `fork()` of the interpreter
+  behind a default-on `mt` feature (`libc` dep), bounded unsafe; cross-process
+  values transfer as re-readable `repr`. **B1–B3 done and wired:** **B1**
+  spawn/sync/abort/fork → `qa-cilk` ✓; **B2** `share` (mmap) → `qa-share` ✓;
+  **B3** `pipe`/`wait-pid` + `write-line` + `do-until`/`do-while` → `qa-pipefork`
+  ✓ (`qa-pipe` uses an external `./newlisp` binary, N/A). **Remaining:** **B4**
+  `send`/`receive` (socketpair per message-enabled child; non-blocking; needs
+  `sys-info -3`/`-4` = this/parent pid) → `qa-message`/`qa-msgbig`; **B5**
+  `signal` + `exec`-with-`signal` → `qa-siguser`.
 - **Networking** (`net-connect`/`net-listen`/`net-accept`/`net-send`/`net-receive`/
   `net-select`, then UDP/HTTP/`net-eval`) — the other GUI enabler; grilled ADR.
   Unlocks `qa-net`/`qa-udp`/`qa-local-domain`.
