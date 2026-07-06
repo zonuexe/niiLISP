@@ -142,6 +142,7 @@ pub fn install(interp: &Interp) {
     reg("empty?", is_empty);
     reg("not", b_not);
     reg("eval", b_eval);
+    reg("eval-string", b_eval_string);
     // Bitwise.
     reg("&", bit_and);
     reg("|", bit_or);
@@ -1511,6 +1512,23 @@ fn b_not(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
 
 fn b_eval(i: &Interp, args: &[Value]) -> Result<Value, Signal> {
     i.eval(args.first().unwrap_or(&Value::Nil))
+}
+
+/// `(eval-string str [error-value])` — read `str` as code and evaluate its
+/// forms, returning the last result; with a second argument, return it instead
+/// of raising on a read/eval error.
+fn b_eval_string(i: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    let src = match args.first() {
+        Some(Value::Str(b)) => b.clone(),
+        _ => return Err(Signal::error("eval-string: expected a string")),
+    };
+    match i.eval_string(&src) {
+        Ok(v) => Ok(v),
+        Err(e) => match args.get(1) {
+            Some(fallback) => Ok(fallback.clone()),
+            None => Err(e),
+        },
+    }
 }
 
 // ---- I/O and misc --------------------------------------------------------

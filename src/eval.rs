@@ -306,6 +306,24 @@ impl Interp {
         &self.signal_handlers
     }
 
+    /// Read `src` as code and evaluate all its forms, returning the last result
+    /// (`eval-string`; also the guiserver's inbound-event dispatch path).
+    pub fn eval_string(&self, src: &[u8]) -> Result<Value, Signal> {
+        let forms = {
+            let primitives = self.primitive_names();
+            let mut interner = self.interner.borrow_mut();
+            let mut reader = crate::reader::Reader::new(src, &mut interner, &primitives);
+            reader
+                .read_all()
+                .map_err(|e| Signal::error(format!("eval-string: {}", e)))?
+        };
+        let mut result = Value::Nil;
+        for f in &forms {
+            result = self.eval(f)?;
+        }
+        Ok(result)
+    }
+
     /// Read the first form from `src` as **data** (no evaluation) — used to
     /// deserialise a value transferred across a process boundary (ADR-0032).
     /// Returns `nil` if it does not parse.
@@ -3265,6 +3283,15 @@ mod tests {
             "(= (begin (seed 7) (rand 1000000)) (begin (seed 7) (rand 1000000)))"
         ));
         assert!(is_true("(seed 1) (and (>= (rand 10) 0) (< (rand 10) 10))"));
+    }
+
+    #[test]
+    fn eval_string_reads_and_evaluates() {
+        assert_eq!(as_int(run("(eval-string \"(+ 1 2) (* 3 4)\")")), 12);
+        // Sees the current dynamic bindings.
+        assert_eq!(as_int(run("(set 'x 10) (eval-string \"(* x 2)\")")), 20);
+        // A second argument is the error fallback.
+        assert_eq!(as_int(run("(eval-string \"(bad\" 42)")), 42);
     }
 
     #[test]
