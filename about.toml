@@ -12,6 +12,9 @@ accepted = [
     "GPL-3.0-or-later",
     "MIT",
     "ISC",
+    # Boost Software License — permissive, GPLv3-compatible. Windows-only, via
+    # rustyline's clipboard support (clipboard-win / error-code).
+    "BSL-1.0",
 ]
 
 # The union across every published-binary platform is what ships, so notices are

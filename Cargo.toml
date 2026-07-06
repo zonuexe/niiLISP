@@ -34,7 +34,12 @@ name = "niilisp"
 path = "src/main.rs"
 
 [features]
-default = ["ffi", "bigint", "regex", "mt", "net"]
+default = ["ffi", "bigint", "regex", "mt", "net", "readline"]
+# Interactive line editing for the REPL: history, multi-line continuation,
+# matching-bracket highlighting, and Tab symbol completion via the pure-Rust
+# `rustyline` crate (no system libreadline). Off via --no-default-features falls
+# back to a plain line-at-a-time stdin REPL with no extra dependency.
+readline = ["dep:rustyline"]
 # `import`/FFI (ADR-0018/0019). Off via --no-default-features for a pure,
 # safe, zero-native-dependency build.
 ffi = ["dep:libloading", "dep:libffi"]
@@ -67,6 +72,13 @@ gui = ["dep:fltk"]
 num-bigint = { version = "0.4", optional = true }
 num-traits = { version = "0.2", optional = true }
 regex = { version = "1", optional = true }
+# Line-editing for the interactive REPL (readline feature): pure-Rust, no system
+# libreadline, cross-platform (Windows included). MIT-licensed — no conflict with
+# our GPL. Default features only (history file + dirs + custom bindings); the
+# `derive` feature is deliberately off so the proc-macro/unicode-ident chain
+# (and its Unicode-3.0 license) stays out of the tree — the Helper traits are
+# implemented by hand in src/repl.rs instead.
+rustyline = { version = "18", optional = true }
 # GUI toolkit for the `niilisp-gui` helper only (ADR-0034); never linked into
 # the interpreter. Bundled build, so no system toolkit is required.
 fltk = { version = "1.4", optional = true, features = ["fltk-bundled"] }

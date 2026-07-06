@@ -22,5 +22,8 @@ allow = [
     "GPL-3.0-or-later",
     "MIT",
     "ISC",
+    # Boost Software License — permissive, GPLv3-compatible. Pulled in only on
+    # Windows by rustyline's clipboard support (clipboard-win / error-code).
+    "BSL-1.0",
 ]
 confidence-threshold = 0.9
