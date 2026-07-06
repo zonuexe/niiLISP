@@ -2,7 +2,7 @@
 
 Core arithmetic, comparison, formatting, and the **bigint model** all work as newLISP specifies. The real gaps are unbound numeric builtins (`series`, `factor`, `normal`, `deg->rad`, `rad->deg`, `~`) and a handful of functions (`int`, `pow`, `round`) with different argument/error semantics than the book describes.
 
-**Coverage: 29 ✅ / 3 ⚠️ / 6 ❌**  *(updated: `int` nil-on-failure + base parsing, `<<`/`>>` 1-arg)*
+**Coverage: 31 ✅ / 1 ⚠️ / 6 ❌**  *(updated: `int` nil-on-failure + base parsing, `<<`/`>>` 1-arg, `round` sign convention; `PI` matches newLISP)*
 
 > Corrections (verified against the binary + newLISP 10.7.5 manual): four bigint-related verdicts were wrong.
 > - `(zero? 0)` → `true` (works; the original `nil` reading could not be reproduced).
@@ -16,7 +16,7 @@ Core arithmetic, comparison, formatting, and the **bigint model** all work as ne
 | `/` integer division truncates | ✅ | `(/ 10 3)` → `3` |
 | float arithmetic promotion (`(+ 1.5 2)`) | ✅ | `3` shown as `3`... see note below |
 | `add/sub/mul/div/mod` | ✅ | Work as float-returning equivalents |
-| `PI` constant | ⚠️ | Not predefined; must define via `constant` yourself |
+| `PI` constant | ✅ | Not predefined — but newLISP doesn't predefine it either (its examples do `(set 'pi (mul 2 (acos 0)))`); matches |
 | `int` (string→int, with default) | ✅ | Returns `nil`/`default` on failure; parses float & leading-digit strings (fixed 2026-07-06) |
 | `int` with explicit base (hex/octal/binary parsing) | ✅ | `0x`/`0b`/`0o` autodetect + explicit `base` arg (fixed 2026-07-06) |
 | `integer?` / `float?` / `number?` | ✅ | Match book semantics |
@@ -24,7 +24,7 @@ Core arithmetic, comparison, formatting, and the **bigint model** all work as ne
 | `integer?` on `div` result | ✅ | `div` returns float, `integer?` correctly `nil` |
 | `floor` | ✅ | Matches |
 | `ceil` returns float | ✅ | Matches |
-| `round` with negative digit count | ⚠️ | `(round 1234.6789 -1)` → `1230` instead of book's `1234.70000` |
+| `round` with negative digit count | ✅ | newLISP sign convention: `(round 123.49 2)` → `100`, `(round 123.49 -1)` → `123.5` (fixed 2026-07-06) |
 | `round` with 0 digits | ✅ | `1235` (format differs but value matches) |
 | `sgn` | ✅ | Matches |
 | `pow` one-arg form (square) | ❌ | `(pow 2)` errors "expected 2 arguments"; book computes `2^2=4` |
@@ -66,12 +66,13 @@ $ niilisp -e '(println (int "x") " " (int "x" 0) " " (int "0x1F") " " (int "08" 
 nil 0 31 8
 ```
 
-### `round` with negative digit argument does not round to that decimal place
+### ~~`round` negative-digit convention~~ — FIXED 2026-07-06
+niiLISP now follows newLISP's inverted convention (positive = round the integer
+part, negative = round decimal places):
 ```
-$ niilisp -e '(println (round 1234.6789 -1))'
-1230
+$ niilisp -e '(println (round 123.49 2) " " (round 123.49 1) " " (round 123.49 -1) " " (round 123.49 -2))'
+100 120 123.5 123.49
 ```
-Book: `(round 1234.6789 -1)` → `1234.70000` (negative arg rounds to 1 decimal place in newLISP's convention, not to the tens place). niiLISP's negative-argument semantics differ entirely (appears to round to `10^|n|`, i.e. truncating integer digits, rather than rounding decimals).
 
 ### `pow` requires exactly 2 arguments (no implicit square)
 ```

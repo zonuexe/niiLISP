@@ -45,3 +45,21 @@ fn shift_one_arg_and_fold() {
     assert_eq!(eval("(println (<< 6 1))"), "12\n");
     assert_eq!(eval("(println (<< 1 2 3))"), "32\n"); // 1<<2<<3
 }
+
+#[test]
+fn round_newlisp_sign_convention() {
+    // Positive digits round the integer part; negative round decimals.
+    assert_eq!(eval("(println (round 123.49 2))"), "100\n");
+    assert_eq!(eval("(println (round 123.49 1))"), "120\n");
+    assert_eq!(eval("(println (round 123.49 0))"), "123\n");
+    assert_eq!(eval("(println (round 123.49))"), "123\n");
+    assert_eq!(eval("(println (round 123.49 -1))"), "123.5\n");
+    // Clean decimals, no float noise.
+    assert_eq!(eval("(println (round 123.49 -2))"), "123.49\n");
+}
+
+#[test]
+fn time_of_day_is_within_a_day() {
+    let out = eval("(println (and (>= (time-of-day) 0) (< (time-of-day) 86400000)))");
+    assert_eq!(out, "true\n");
+}

@@ -3374,7 +3374,10 @@ mod tests {
     fn rounding_sign_bits_base64() {
         assert_eq!(as_int(run("(int (ceil 3.2))")), 4);
         assert_eq!(as_int(run("(int (floor 3.8))")), 3);
-        assert!(is_true("(= 3.14 (round 3.14159 2))"));
+        // newLISP: negative digits round decimal places (positive rounds the
+        // integer part), so 2-decimal rounding is `-2`.
+        assert!(is_true("(= 3.14 (round 3.14159 -2))"));
+        assert!(is_true("(= 100 (round 123.49 2))"));
         assert_eq!(as_int(run("(sgn -5)")), -1);
         assert_eq!(as_int(run("(sgn 0)")), 0);
         assert_eq!(as_int(run("(sgn 9)")), 1);

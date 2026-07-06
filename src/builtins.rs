@@ -584,8 +584,20 @@ fn b_round(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
         Some(v) => to_i64(v)?,
         None => 0,
     };
-    let factor = 10f64.powi(digits as i32);
-    Ok(Value::Float((x * factor).round() / factor))
+    // newLISP's sign convention is inverted from the common one: a *positive*
+    // int-digits rounds the integer part (to 10^digits), a *negative* one
+    // rounds that many decimal places. (round 123.49 2) -> 100,
+    // (round 123.49 -1) -> 123.5. Dividing by an exact power of ten (rather
+    // than multiplying by its noisy reciprocal) keeps the decimal case clean.
+    let factor = 10f64.powi(digits.unsigned_abs() as i32);
+    let r = if digits < 0 {
+        (x * factor).round() / factor
+    } else if digits > 0 {
+        (x / factor).round() * factor
+    } else {
+        x.round()
+    };
+    Ok(Value::Float(r))
 }
 
 /// `(sgn num [neg zero pos])` — the sign as `-1`/`0`/`1`, or the matching one of
@@ -1682,12 +1694,14 @@ fn shr(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
 }
 
 fn time_of_day(_: &Interp, _: &[Value]) -> Result<Value, Signal> {
+    // Milliseconds since the start of the day, matching newLISP's
+    // milliSecTime() (`tv_sec % 86400`): the epoch-ms taken modulo a day.
     use std::time::{SystemTime, UNIX_EPOCH};
     let ms = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0);
-    Ok(Value::Int(ms))
+    Ok(Value::Int(ms.rem_euclid(86_400_000)))
 }
 
 // ---- format (printf subset) ---------------------------------------------

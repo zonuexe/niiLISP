@@ -1,14 +1,14 @@
 # Ch. 9 — Working with dates and times
 
-niiLISP implements almost none of newLISP's date/time API: only `time`, `time-of-day`, and `sleep` exist as builtins, and `time-of-day` itself returns the wrong value (raw epoch milliseconds instead of milliseconds since midnight).
+niiLISP implements almost none of newLISP's date/time API: only `time`, `time-of-day`, and `sleep` exist as builtins. The calendar/formatting family (`date`, `date-value`, `now`, `date-parse`, `timer`) is entirely unbound.
 
-**Coverage: 2 ✅ / 1 ⚠️ / 6 ❌**
+**Coverage: 3 ✅ / 0 ⚠️ / 6 ❌**  *(updated: `time-of-day` now ms-since-midnight)*
 
 | Feature | Status | Notes |
 |---|---|---|
 | `time` | ✅ | Returns elapsed milliseconds for evaluating an expression N times, matches book semantics. |
 | `sleep` | ✅ | Blocks and returns the argument, consistent with newLISP behavior. |
-| `time-of-day` | ⚠️ | Builtin exists but returns raw epoch milliseconds, not "milliseconds since start of today." |
+| `time-of-day` | ✅ | Returns ms since (UTC) midnight, `< 86400000`, matching newLISP's `tv_sec % 86400` (fixed 2026-07-06) |
 | `date` | ❌ | Symbol unbound; calling it errors `not a function: nil`. |
 | `date-value` | ❌ | Symbol unbound; same error. |
 | `now` | ❌ | Symbol unbound; same error. |
@@ -18,16 +18,11 @@ niiLISP implements almost none of newLISP's date/time API: only `time`, `time-of
 
 ## Divergences & gaps
 
-### `time-of-day` returns epoch ms, not ms-since-midnight (⚠️)
+### ~~`time-of-day` returns epoch ms, not ms-since-midnight~~ — FIXED 2026-07-06
 
-Book: `(time-of-day)` → "return milliseconds since the start of today till now", so the value should always be `< 86400000`.
-
-```
-$ ./target/release/niilisp -e '(println (time-of-day))'
-1783338857120
-```
-
-That's clearly raw Unix epoch time in milliseconds (equivalent to `date +%s%3N`), not time-of-day-relative. Any script porting the book's idiom `(div (- (time-of-day) start-time) 1000)` to compute elapsed seconds still happens to work (since it's a delta), but direct use of the absolute value (e.g. formatting "seconds since midnight") would be wrong.
+`(time-of-day)` now returns `epoch_ms % 86_400_000` (always `< 86400000`),
+matching newLISP's `milliSecTime()` which does `tv_sec % 86400`. Like newLISP,
+the reference point is UTC midnight, not local.
 
 ### `date` unbound (❌)
 
