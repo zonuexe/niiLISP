@@ -552,8 +552,6 @@ fn file_info_fields(md: &fs::Metadata) -> [i64; 10] {
             .map(|d| d.as_secs() as i64)
             .unwrap_or(0)
     };
-    let m = fs::symlink_metadata; // silence unused import on some targets
-    let _ = m;
     [
         md.len() as i64,
         0,
