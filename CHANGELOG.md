@@ -6,16 +6,23 @@ All notable changes to niiLISP are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-07-06
+
+An audit of niiLISP against the *Introduction to newLISP* WikiBook (`docs/notes/20260706_wikibook-coverage/`) drives this release: it adds the `$idx` loop iterator, regex capture variables, and the `context` reflection forms, and corrects several builtins that behaved differently from newLISP.
+
 ### Added
 
-- The **`$idx` system iterator** variable: `dolist`, `dostring`, `dotree`, `map`, and the `while`/`until`/`do-while`/`do-until` loops now maintain `$idx` as the current 0-based offset (e.g. `(map (fn (x) (list $idx x)) '(a b c))` → `((0 a) (1 b) (2 c))`), matching newLISP. It is dynamically scoped — saved on entry and restored (to its prior value, or unbound) on exit, so nested loops nest correctly. Surfaced by the *Introduction to newLISP* WikiBook coverage audit (`docs/notes/20260706_wikibook-coverage/`).
+- The **`$idx` system iterator** variable: `dolist`, `dostring`, `dotree`, `map`, and the `while`/`until`/`do-while`/`do-until` loops now maintain `$idx` as the current 0-based offset (e.g. `(map (fn (x) (list $idx x)) '(a b c))` → `((0 a) (1 b) (2 c))`), matching newLISP. It is dynamically scoped — saved on entry and restored on exit — so nested loops nest correctly.
+- **Regex capture variables and regex-mode `find`/`replace`**: `regex`, `find` with an option argument, and `replace` now bind the system variables `$0` (whole match) and `$1..$N` (capture groups). `(find pattern str option)` engages the regex engine and returns the match offset. String `replace` re-evaluates its replacement expression **once per match** with `$0..$N` bound (`(replace "\\w+" s (upper-case $0) 0)` uppercases each word), in both the literal 3-argument form (the key is matched literally) and the 4-argument regex form.
+- **`context` reflection and symbol-creation forms**: `(context)` with no argument returns the current context (tracked at eval time across `(context X)` switches), and `(context ctx word [value])` creates the symbol `ctx:word` — a `nil`-free way to build data structures — optionally setting its value and returning the symbol.
 
 ### Fixed
 
-- `context` reflection and symbol-creation forms (from the WikiBook audit): `(context)` with no argument returns the current context (tracked at eval time across `(context X)` switches), and `(context ctx word [value])` creates the symbol `ctx:word` — a `nil`-free way to build data structures — optionally setting its value and returning the symbol.
-- **Regex capture variables and regex-mode `find`/`replace`** (from the WikiBook audit): `regex`, `find` with an option argument, and `replace` now bind the system variables `$0` (whole match) and `$1..$N` (capture groups). `(find pattern str option)` engages the regex engine and returns the match offset. String `replace` re-evaluates its replacement expression **once per match** with `$0..$N` bound (`(replace "\\w+" s (upper-case $0) 0)` uppercases each word), in both the literal 3-argument form (the key is matched literally) and the 4-argument regex form. This unblocks both file-tree text-editor examples in the book's "More examples" chapter.
 - `(save file)` with no symbol arguments now dumps the whole workspace (every user-defined MAIN symbol and context, excluding built-in primitives, `$`-system symbols, and unset symbols) as loadable source, instead of writing an empty file; `(save file sym…)` still dumps just the named symbols.
-- Builtin edge semantics found by the WikiBook coverage audit: `int` now returns `nil` (or its `default` argument) instead of a silent `0` when a string can't be converted, and it parses `0x`/`0b`/`0o` prefixes and an explicit `base` argument (`(int "0x1F")` → `31`, `(int "FF" 0 16)` → `255`); `dup`'s third argument replicates into a list (`(dup "x" 3 true)` → `("x" "x" "x")`); `<<`/`>>` accept the 1-argument shift-by-one form (`(<< 6)` → `12`) and fold multiple shift counts (`(<< 1 2 3)` → `32`); `round` follows newLISP's inverted digit-sign convention (positive rounds the integer part, negative rounds decimals — `(round 123.49 2)` → `100`, `(round 123.49 -1)` → `123.5`); and `time-of-day` returns milliseconds since midnight (`epoch % 86400000`) rather than the raw epoch.
+- `int` returns `nil` (or its `default` argument) instead of a silent `0` when a string can't be converted, and parses `0x`/`0b`/`0o` prefixes and an explicit `base` argument (`(int "0x1F")` → `31`, `(int "FF" 0 16)` → `255`).
+- `dup`'s third argument replicates into a list (`(dup "x" 3 true)` → `("x" "x" "x")`), and `<<`/`>>` accept the 1-argument shift-by-one form (`(<< 6)` → `12`) and fold multiple shift counts (`(<< 1 2 3)` → `32`).
+- `round` follows newLISP's inverted digit-sign convention: a positive count rounds the integer part, a negative count rounds decimal places (`(round 123.49 2)` → `100`, `(round 123.49 -1)` → `123.5`).
+- `time-of-day` returns milliseconds since midnight (`epoch % 86400000`) rather than the raw epoch.
 
 ## [0.3.1] - 2026-07-06
 
@@ -107,7 +114,8 @@ Initial release: a usable command-line interpreter for small newLISP scripts.
 `import`/FFI, networking, bigint, arrays, full UTF-8 character operations, and
 the remaining newLISP standard library.
 
-[Unreleased]: https://github.com/zonuexe/niiLISP/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/zonuexe/niiLISP/compare/v0.3.2...HEAD
+[0.3.2]: https://github.com/zonuexe/niiLISP/releases/tag/v0.3.2
 [0.3.1]: https://github.com/zonuexe/niiLISP/releases/tag/v0.3.1
 [0.3.0]: https://github.com/zonuexe/niiLISP/releases/tag/v0.3.0
 [0.2.0]: https://github.com/zonuexe/niiLISP/releases/tag/v0.2.0

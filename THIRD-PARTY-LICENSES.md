@@ -70,7 +70,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 Used by:
 
-- niilisp 0.3.1 — https://github.com/zonuexe/niiLISP
+- niilisp 0.3.2 — https://github.com/zonuexe/niiLISP
 
 ```text
 <?xml version="1.0" encoding="UTF-8"?>
