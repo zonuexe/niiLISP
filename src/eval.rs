@@ -3253,6 +3253,15 @@ mod tests {
     }
 
     #[test]
+    fn parse_splits() {
+        assert!(is_true("(= (parse \"  a  b c \") '(\"a\" \"b\" \"c\"))"));
+        assert!(is_true(
+            "(= (parse \"a,b,,c\" \",\") '(\"a\" \"b\" \"\" \"c\"))"
+        ));
+        assert!(is_true("(= (parse \"abc\" \"\") '(\"a\" \"b\" \"c\"))"));
+    }
+
+    #[test]
     fn rounding_sign_bits_base64() {
         assert_eq!(as_int(run("(int (ceil 3.2))")), 4);
         assert_eq!(as_int(run("(int (floor 3.8))")), 3);

@@ -60,6 +60,7 @@ pub fn install(interp: &Interp) {
     reg("bits", b_bits);
     reg("base64-enc", b_base64_enc);
     reg("base64-dec", b_base64_dec);
+    reg("parse", b_parse);
     reg("NaN?", is_nan_p);
     reg("inf?", is_inf_p);
     reg("int", b_int);
@@ -598,6 +599,64 @@ fn b_base64_dec(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
         }
     }
     Ok(Value::str(out))
+}
+
+/// Split byte string `s` on each occurrence of the literal separator `sep`,
+/// keeping empty pieces between adjacent separators.
+fn split_literal(s: &[u8], sep: &[u8]) -> Vec<Value> {
+    let mut out = Vec::new();
+    let mut start = 0;
+    let mut i = 0;
+    while i + sep.len() <= s.len() {
+        if &s[i..i + sep.len()] == sep {
+            out.push(Value::str(s[start..i].to_vec()));
+            i += sep.len();
+            start = i;
+        } else {
+            i += 1;
+        }
+    }
+    out.push(Value::str(s[start..].to_vec()));
+    out
+}
+
+/// `(parse str [sep [option]])` — split `str` into a list of strings: on runs of
+/// whitespace by default; on the literal separator `sep`; or, with a third
+/// `option` argument (a PCRE option integer), on the regex `sep` (regex feature).
+#[cfg_attr(not(feature = "regex"), allow(unused_variables))]
+fn b_parse(interp: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    let s = match args.first() {
+        Some(Value::Str(b)) => b.clone(),
+        _ => return Err(Signal::error("parse: expected a string")),
+    };
+    match args.get(1) {
+        None => Ok(Value::list(
+            s.split(u8::is_ascii_whitespace)
+                .filter(|t| !t.is_empty())
+                .map(|t| Value::str(t.to_vec()))
+                .collect(),
+        )),
+        Some(Value::Str(sep)) => {
+            #[cfg(feature = "regex")]
+            if let Some(opt) = args.get(2) {
+                let pattern = String::from_utf8_lossy(sep).into_owned();
+                let re = interp.compiled_regex(&pattern, to_i64(opt)?)?;
+                return Ok(Value::list(
+                    re.split(&s).map(|p| Value::str(p.to_vec())).collect(),
+                ));
+            }
+            if sep.is_empty() {
+                // An empty separator splits into individual characters.
+                return Ok(Value::list(
+                    crate::utf8::char_ranges(&s)
+                        .map(|(a, b)| Value::str(s[a..b].to_vec()))
+                        .collect(),
+                ));
+            }
+            Ok(Value::list(split_literal(&s, sep)))
+        }
+        _ => Err(Signal::error("parse: separator must be a string")),
+    }
 }
 
 fn b_abs(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
