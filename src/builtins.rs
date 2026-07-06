@@ -84,6 +84,10 @@ pub fn install(interp: &Interp) {
     });
     reg("protected?", b_protected);
     reg("title-case", b_title_case);
+    reg("name", b_name);
+    reg("prefix", b_prefix);
+    reg("sym", b_sym);
+    reg("symbols", b_symbols);
     reg("NaN?", is_nan_p);
     reg("inf?", is_inf_p);
     reg("int", b_int);
@@ -680,6 +684,72 @@ fn b_parse(interp: &Interp, args: &[Value]) -> Result<Value, Signal> {
         }
         _ => Err(Signal::error("parse: separator must be a string")),
     }
+}
+
+/// `(name sym)` — the symbol's term (its name without any context prefix), as a
+/// string.
+fn b_name(interp: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    match args.first() {
+        Some(Value::Symbol(id)) | Some(Value::Context(id)) => {
+            let name = interp.sym_name(*id);
+            let term = name.rsplit(':').next().unwrap_or(&name);
+            Ok(Value::str(term.as_bytes().to_vec()))
+        }
+        _ => Err(Signal::error("name: expected a symbol")),
+    }
+}
+
+/// `(prefix sym)` — the context a symbol belongs to (its qualifier, `MAIN` if
+/// unqualified), as a context value.
+fn b_prefix(interp: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    match args.first() {
+        Some(Value::Symbol(id)) | Some(Value::Context(id)) => {
+            let name = interp.sym_name(*id);
+            let ctx = name.rsplit_once(':').map_or("MAIN", |(c, _)| c);
+            Ok(Value::Context(interp.intern(ctx)))
+        }
+        _ => Err(Signal::error("prefix: expected a symbol")),
+    }
+}
+
+/// `(sym str [ctx])` — intern (creating if needed) the symbol named `str`, in
+/// context `ctx` (or MAIN); returns the symbol.
+fn b_sym(interp: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    let s = match args.first() {
+        Some(Value::Str(b)) => String::from_utf8_lossy(b).into_owned(),
+        Some(Value::Symbol(id)) => interp.sym_name(*id),
+        Some(v) => to_display(v, &interp.interner.borrow()),
+        None => return Err(Signal::error("sym: expected a name")),
+    };
+    let full = match args.get(1) {
+        Some(Value::Context(id)) | Some(Value::Symbol(id)) => {
+            let ctx = interp.sym_name(*id);
+            if ctx == "MAIN" || s.contains(':') {
+                s
+            } else {
+                format!("{}:{}", ctx, s)
+            }
+        }
+        _ => s,
+    };
+    Ok(Value::Symbol(interp.intern(&full)))
+}
+
+/// `(symbols [ctx])` — the name-sorted symbols of context `ctx` (or the MAIN
+/// symbols if omitted).
+fn b_symbols(interp: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    let ids = match args.first() {
+        Some(Value::Context(id)) | Some(Value::Symbol(id)) => {
+            let ctx = interp.sym_name(*id);
+            if ctx == "MAIN" {
+                interp.main_symbol_ids()
+            } else {
+                interp.context_symbol_ids(&ctx)
+            }
+        }
+        _ => interp.main_symbol_ids(),
+    };
+    Ok(Value::list(ids.into_iter().map(Value::Symbol).collect()))
 }
 
 /// `(protected? 'sym)` — whether a symbol is write-protected by `constant`.

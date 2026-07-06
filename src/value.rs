@@ -141,4 +141,18 @@ impl Interner {
         out.sort_by(|&a, &b| self.names[a].cmp(&self.names[b]));
         out
     }
+
+    /// The MAIN-level symbols (names without a context prefix), name-sorted —
+    /// for `(symbols)` / `(symbols MAIN)`.
+    pub fn main_symbols(&self) -> Vec<SymId> {
+        let mut out: Vec<SymId> = self
+            .names
+            .iter()
+            .enumerate()
+            .filter(|(_, n)| !n.contains(':'))
+            .map(|(i, _)| i as SymId)
+            .collect();
+        out.sort_by(|&a, &b| self.names[a].cmp(&self.names[b]));
+        out
+    }
 }

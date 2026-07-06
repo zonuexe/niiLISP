@@ -661,6 +661,11 @@ impl Interp {
         self.interner.borrow().context_symbols(ctx)
     }
 
+    /// The MAIN-level symbol ids (for `symbols`).
+    pub fn main_symbol_ids(&self) -> Vec<SymId> {
+        self.interner.borrow().main_symbols()
+    }
+
     /// The number of bound global symbols, a rough cell count for `sys-info`.
     pub fn global_count(&self) -> usize {
         self.globals.borrow().len()
@@ -3255,6 +3260,16 @@ mod tests {
             "(= (begin (seed 7) (rand 1000000)) (begin (seed 7) (rand 1000000)))"
         ));
         assert!(is_true("(seed 1) (and (>= (rand 10) 0) (< (rand 10) 10))"));
+    }
+
+    #[test]
+    fn symbol_reflection() {
+        assert_eq!(as_str(run("(name 'Foo:bar)")), "bar");
+        assert_eq!(as_str(run("(name (prefix 'Foo:bar))")), "Foo");
+        assert!(is_true("(= (sym \"x\" 'Foo) 'Foo:x)"));
+        assert!(is_true(
+            "(set 'Baz:a 1) (set 'Baz:b 2) (= (symbols 'Baz) '(Baz:a Baz:b))"
+        ));
     }
 
     #[test]
