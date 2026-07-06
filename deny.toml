@@ -1,0 +1,26 @@
+# cargo-deny configuration — the license audit run in CI as `cargo deny check
+# licenses`. It fails if any dependency's license is outside `allow`, so a new
+# dependency under an unexpected (e.g. incompatible-copyleft) license can't slip
+# in unnoticed. The bundled notices themselves are generated separately by
+# `cargo about`.
+
+# Audit the union of the published-binary platforms (same set as about.toml), so a
+# license used only on, say, Windows is still covered.
+[graph]
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "aarch64-apple-darwin",
+    "x86_64-pc-windows-msvc",
+]
+
+[licenses]
+# Licenses accepted for niiLISP (GPL-3.0-or-later) and every dependency. Keep this
+# in sync with `about.toml`'s `accepted`. Add a license here only after confirming
+# it is compatible with distributing niiLISP under the GPLv3.
+allow = [
+    "GPL-3.0-or-later",
+    "MIT",
+    "ISC",
+]
+confidence-threshold = 0.9

@@ -134,18 +134,16 @@ pub fn install(interp: &Interp) {
     }
 }
 
-/// The Cilk API state (ADR-0032): the pending `spawn`ed children. Present in
-/// every build so the `Interp` field type resolves, but only populated under
-/// the Unix `mt` build.
+/// The Cilk API state (ADR-0032): the pending `spawn`ed children, `share`d
+/// pages, and message channels. Only exists in the Unix `mt` build (the `Interp`
+/// field that holds it is `mt`-gated too).
+#[cfg(all(feature = "mt", unix))]
 #[derive(Default)]
 pub struct CilkState {
-    #[cfg(all(feature = "mt", unix))]
     spawns: Vec<cilk::SpawnEntry>,
-    #[cfg(all(feature = "mt", unix))]
     pages: Vec<cilk::SharePage>,
     /// Message channels: for each peer process (a child in the parent, the
     /// parent in a child), the non-blocking datagram socket to it (ADR-0032).
-    #[cfg(all(feature = "mt", unix))]
     channels: Vec<(libc::pid_t, i32)>,
 }
 

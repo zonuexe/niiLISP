@@ -22,6 +22,11 @@ exclude = [
     "/docs/CURRENT_WORK.md",
     "/references",
     "/tests",
+    # Dev-only license tooling (cargo-about / cargo-deny); the generated
+    # THIRD-PARTY-LICENSES.md is embedded via include_str! and ships regardless.
+    "/about.toml",
+    "/about.hbs",
+    "/deny.toml",
 ]
 
 [[bin]]
