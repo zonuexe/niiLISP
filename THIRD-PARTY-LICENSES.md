@@ -19,7 +19,7 @@ appears once, with the list of crates that use it._
 
 Used by:
 
-- niilisp 0.2.0 — https://github.com/zonuexe/niiLISP
+- niilisp 0.3.0 — https://github.com/zonuexe/niiLISP
 
 ```text
 <?xml version="1.0" encoding="UTF-8"?>
