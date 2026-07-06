@@ -87,12 +87,16 @@ _Avoid_: "text", "UTF-8 string" (misleading — storage is bytes, not validated 
 An opaque integer returned by `open`, naming an open file in an interpreter-side registry (ADR-0029). It is a plain `Value::Int`, not a distinct value type — newLISP handles are integers and scripts pass and compare them as such. `0`/`1`/`2` are reserved for stdin/stdout/stderr; other numbers are registry slots reused from a freelist after `close` (so a stale handle can name a later-opened file, as in newLISP). Distinct from an **address (FFI)**, which is a real memory address of a value's buffer.
 _Avoid_: "file descriptor" (it is not the OS fd), "stream", "pointer"
 
+**External process**:
+An independent OS program launched by `process` (non-blocking, returns its pid) or run to completion by `exec`/`!` (ADR-0031). Uses `std::process::Command` — safe, cross-platform, always compiled in. The pid is a plain `Value::Int`, like a **File handle**. Distinct from the **Cilk API**, which forks the interpreter itself rather than exec'ing another program.
+_Avoid_: "child" (reserve for a forked Cilk process), "thread"
+
 **Cilk API (`spawn`/`sync`)**:
-newLISP's high-level parallelism: `spawn` evaluates an expression in a child process, binding its result to a variable later; `sync` waits for spawned children and collects results. Built on `fork`. niiLISP reproduces it on real OS processes.
+newLISP's high-level parallelism: `spawn` evaluates an expression in a child process, binding its result to a variable on `sync`; `sync` waits for spawned children (optionally calling an inlet per finish) and `abort` cancels them. Built on real Unix `fork()` of the interpreter, so a child inherits all the parent's definitions (ADR-0032). Behind a default-on `mt` build feature, Unix-only (like FFI). A child's result crosses back as its re-readable `repr`, read as data — the ORO deep-copy across the process boundary. niiLISP is single-threaded, so fork-then-continue is safe.
 _Avoid_: "threads", "async tasks", "futures"
 
 **share**:
-newLISP's OS-shared-memory cell for exchanging a single value between processes: `(share)` allocates, `(share adr val)` writes, `(share adr)` reads. Reproduced with real shared memory, consistent with the process model.
+newLISP's OS-shared-memory cell for exchanging a single value between processes: `(share)` allocates, `(share adr val)` writes, `(share adr)` reads. Reproduced as a `mmap`ed `MAP_SHARED` page whose real address (an integer, valid across `fork` since it preserves virtual addresses) is the handle; the value is stored as its binary-safe `repr` (ADR-0032). Part of the **Cilk API**'s `mt` feature.
 _Avoid_: "shared variable", "global"
 
 **bigint**:
