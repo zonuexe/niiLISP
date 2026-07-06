@@ -123,6 +123,7 @@ pub fn install(interp: &Interp) {
     {
         interp.register_builtin("sync", cilk::b_sync);
         interp.register_builtin("abort", cilk::b_abort);
+        interp.register_builtin("share", cilk::b_share);
         // `spawn` is a special form (its expression runs in the child) — see
         // `try_special_form` / `cilk::sf_spawn`.
     }
@@ -135,6 +136,8 @@ pub fn install(interp: &Interp) {
 pub struct CilkState {
     #[cfg(all(feature = "mt", unix))]
     spawns: Vec<cilk::SpawnEntry>,
+    #[cfg(all(feature = "mt", unix))]
+    pages: Vec<cilk::SharePage>,
 }
 
 /// `spawn`/`sync`/`abort`, forking the interpreter (ADR-0032).
@@ -156,6 +159,75 @@ mod cilk {
         pid: libc::pid_t,
         sym: SymId,
         read_fd: i32,
+    }
+
+    /// A `share`d memory page: an `mmap`ed `MAP_SHARED` region, inherited by
+    /// children across `fork` (ADR-0032).
+    pub struct SharePage {
+        addr: usize,
+    }
+
+    /// One `share` page. A page holds `[u32 length][repr bytes]`; 4 KiB is far
+    /// more than the small serialised values `share` carries.
+    const SHARE_PAGE_SIZE: usize = 4096;
+
+    /// `(share)` allocates a shared page and returns its address; `(share adr
+    /// val)` writes `val` (as its binary-safe `repr`); `(share adr)` reads it
+    /// back (`nil` if never written). The address is validated against the page
+    /// registry (bounding the `unsafe`); children inherit both the mapping and
+    /// the registry across `fork`.
+    pub fn b_share(interp: &Interp, args: &[Value]) -> Result<Value, Signal> {
+        let adr = match args.first() {
+            None => {
+                let addr = unsafe {
+                    libc::mmap(
+                        std::ptr::null_mut(),
+                        SHARE_PAGE_SIZE,
+                        libc::PROT_READ | libc::PROT_WRITE,
+                        libc::MAP_SHARED | libc::MAP_ANONYMOUS,
+                        -1,
+                        0,
+                    )
+                };
+                if addr == libc::MAP_FAILED {
+                    return Ok(Value::Nil);
+                }
+                unsafe { std::ptr::write_bytes(addr as *mut u8, 0, 4) };
+                let a = addr as usize;
+                interp.cilk().borrow_mut().pages.push(SharePage { addr: a });
+                return Ok(Value::Int(a as i64));
+            }
+            Some(v) => to_i64(v) as usize,
+        };
+
+        if !interp.cilk().borrow().pages.iter().any(|p| p.addr == adr) {
+            return Err(Signal::error("share: address is not a shared page"));
+        }
+        let ptr = adr as *mut u8;
+
+        if let Some(val) = args.get(1) {
+            let bytes = interp.repr(val).into_bytes();
+            if bytes.len() + 4 > SHARE_PAGE_SIZE {
+                return Err(Signal::error("share: value too large for the page"));
+            }
+            unsafe {
+                std::ptr::copy_nonoverlapping((bytes.len() as u32).to_ne_bytes().as_ptr(), ptr, 4);
+                std::ptr::copy_nonoverlapping(bytes.as_ptr(), ptr.add(4), bytes.len());
+            }
+            Ok(val.clone())
+        } else {
+            let len = unsafe {
+                let mut lb = [0u8; 4];
+                std::ptr::copy_nonoverlapping(ptr, lb.as_mut_ptr(), 4);
+                u32::from_ne_bytes(lb) as usize
+            };
+            if len == 0 || len + 4 > SHARE_PAGE_SIZE {
+                return Ok(Value::Nil);
+            }
+            let mut buf = vec![0u8; len];
+            unsafe { std::ptr::copy_nonoverlapping(ptr.add(4), buf.as_mut_ptr(), len) };
+            Ok(interp.read_one(&buf))
+        }
     }
 
     impl CilkState {

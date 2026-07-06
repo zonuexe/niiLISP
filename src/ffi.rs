@@ -720,7 +720,16 @@ fn b_pack(_interp: &Interp, args: &[Value]) -> Result<Value, Signal> {
     let layout = args
         .first()
         .ok_or_else(|| Signal::error("pack: missing layout"))?;
-    let vals = &args[1..];
+    // A single list argument is spread into its elements, as in newLISP:
+    // `(pack fmt (sequence 1 10))` packs the ten numbers.
+    let spread;
+    let vals: &[Value] = match &args[1..] {
+        [Value::List(l)] => {
+            spread = l.to_vec();
+            &spread
+        }
+        rest => rest,
+    };
     match layout {
         Value::Str(fmt) => pack_format(fmt, vals),
         Value::List(_) => pack_struct(layout, vals),

@@ -243,6 +243,21 @@ fn qa_cilk_passes() {
     );
 }
 
+/// `share` (ADR-0032): a parent writes a packed buffer into an `mmap`ed
+/// `MAP_SHARED` page, a `spawn`ed child reads and `unpack`s it, and `sync`
+/// returns the result — exercising shared memory across `fork`. Needs `mt`
+/// (fork/mmap) and `ffi` (`pack`/`unpack`).
+#[cfg(all(feature = "mt", feature = "ffi", unix))]
+#[test]
+fn qa_share_passes() {
+    let stdout = run_qa("qa-share");
+    assert!(
+        stdout.contains("test passed SUCCESSFUL"),
+        "qa-share did not pass:\n{}",
+        stdout
+    );
+}
+
 #[test]
 fn qa_foop_passes() {
     let stdout = run_qa("qa-foop");
