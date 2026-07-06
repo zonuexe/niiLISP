@@ -142,6 +142,14 @@ impl Interner {
         out
     }
 
+    /// Every interned name, in interning order — used by the REPL to offer
+    /// Tab-completion candidates (primitives plus whatever the session has
+    /// interned so far). Only the `readline` REPL consumes it.
+    #[cfg_attr(not(feature = "readline"), allow(dead_code))]
+    pub fn all_names(&self) -> impl Iterator<Item = &str> {
+        self.names.iter().map(String::as_str)
+    }
+
     /// The MAIN-level symbols (names without a context prefix), name-sorted —
     /// for `(symbols)` / `(symbols MAIN)`.
     pub fn main_symbols(&self) -> Vec<SymId> {

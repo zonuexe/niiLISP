@@ -27,6 +27,13 @@ libffi on Unix — install it if missing (`brew install libffi`, or
 dependency-free build without either, use `--no-default-features` (or enable just
 one, e.g. `--no-default-features --features bigint`).
 
+The interactive REPL has line editing via the `readline` feature (also on by
+default): command history persisted to `~/.niilisp_history`, multi-line
+continuation (an unclosed form keeps reading on the next line), matching-bracket
+highlighting, and Tab completion over defined symbols. It uses the pure-Rust
+`rustyline` — no system libreadline — so it cross-compiles like the rest.
+`--no-default-features` drops it back to a plain line-at-a-time REPL.
+
 ## Usage
 
 ```

@@ -18,6 +18,7 @@ mod net;
 mod printer;
 mod process;
 mod reader;
+mod repl;
 mod utf8;
 mod value;
 
@@ -84,7 +85,7 @@ fn main() -> ExitCode {
 
     match args.get(1).map(String::as_str) {
         None => {
-            repl(&interp);
+            repl::run(&interp);
             ExitCode::SUCCESS
         }
         Some("-h") | Some("--help") => {
@@ -162,43 +163,6 @@ fn signal_message(interp: &Interp, sig: Signal) -> String {
     match sig {
         Signal::Error(msg) => msg,
         Signal::Throw(v) => format!("uncaught throw: {}", interp.repr(&v)),
-    }
-}
-
-fn repl(interp: &Interp) {
-    use std::io::{BufRead, Write};
-    eprintln!(
-        "niilisp {} - type expressions, Ctrl-D to exit",
-        env!("CARGO_PKG_VERSION")
-    );
-    let stdin = std::io::stdin();
-    loop {
-        print!("niilisp> ");
-        let _ = std::io::stdout().flush();
-
-        let mut line = String::new();
-        match stdin.lock().read_line(&mut line) {
-            Ok(0) => break, // EOF
-            Ok(_) => {}
-            Err(e) => {
-                eprintln!("input error: {}", e);
-                break;
-            }
-        }
-
-        let forms = match read_forms(interp, line.as_bytes()) {
-            Ok(f) => f,
-            Err(e) => {
-                eprintln!("read error: {}", e);
-                continue;
-            }
-        };
-        for form in &forms {
-            match interp.eval(form) {
-                Ok(v) => println!("{}", interp.repr(&v)),
-                Err(sig) => eprintln!("{}", signal_message(interp, sig)),
-            }
-        }
     }
 }
 
