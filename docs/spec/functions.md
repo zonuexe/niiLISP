@@ -219,6 +219,22 @@ serialise a context deterministically (sorted members), so re-saving an
 unchanged Dictionary is byte-identical — the basis of `qa-dictionary`'s
 round-trip check.
 
+## External processes (ADR-0031)
+
+Always compiled in, cross-platform (`std::process::Command`). A pid is a plain
+integer; failures return `nil`.
+
+| Function | Meaning |
+| --- | --- |
+| `(process "cmd arg…")` | spawn an external command (whitespace-split argv), non-blocking; returns the child pid, or `nil` |
+| `(exec "cmd" [instr])` | run `cmd` through the shell to completion; returns stdout as a list of lines; `instr` is fed to stdin |
+| `(! "cmd")` | run `cmd` through the shell with inherited stdio; returns its exit code |
+| `(sleep ms)` | pause for `ms` milliseconds, returning `ms` |
+
+The fork-based **Cilk API** (`spawn`/`sync`/`abort`/`share`/`send`/`receive`,
+`fork`/`pipe`/`wait-pid`, `signal`) is a separate Unix-only, `mt`-gated slice
+(ADR-0032), not yet implemented.
+
 ## FFI (Unix, `ffi` feature)
 
 | Function | Meaning |

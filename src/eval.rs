@@ -251,6 +251,7 @@ impl Interp {
         builtins::install(&interp);
         crate::ffi::install(&interp);
         crate::fileio::install(&interp);
+        crate::process::install(&interp);
         interp
     }
 

@@ -15,6 +15,7 @@ mod eval;
 mod ffi;
 mod fileio;
 mod printer;
+mod process;
 mod reader;
 mod utf8;
 mod value;
