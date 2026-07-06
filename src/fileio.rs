@@ -606,8 +606,33 @@ fn b_source(interp: &Interp, args: &[Value]) -> Result<Value, Signal> {
 
 fn b_save(interp: &Interp, args: &[Value]) -> Result<Value, Signal> {
     let path = path_arg(args.first(), "save")?;
-    let src = build_source(interp, args.get(1..).unwrap_or(&[]))?;
+    // (save file) with no symbols dumps the whole workspace, like newLISP;
+    // (save file sym...) dumps just the named symbols.
+    let src = if args.len() > 1 {
+        build_source(interp, &args[1..])?
+    } else {
+        build_workspace_source(interp)
+    };
     Ok(bool_result(fs::write(&path, src).is_ok()))
+}
+
+/// Serialise every user-defined MAIN-level symbol (and context) to loadable
+/// source, for the no-symbol `(save file)` form. Excludes built-in primitives,
+/// unset (`nil`) symbols, and `$`-prefixed system symbols, matching newLISP.
+fn build_workspace_source(interp: &Interp) -> String {
+    let mut ids = interp.main_symbol_ids();
+    ids.sort_by_key(|id| interp.sym_name(*id));
+    let mut out = String::new();
+    for id in ids {
+        if interp.sym_name(id).starts_with('$') {
+            continue;
+        }
+        match interp.lookup(id) {
+            Value::Nil | Value::Builtin(_) => continue,
+            _ => out.push_str(&interp.source_of(id)),
+        }
+    }
+    out
 }
 
 fn b_load(interp: &Interp, args: &[Value]) -> Result<Value, Signal> {

@@ -1,8 +1,8 @@
 # Ch. 10 — Working with files
 
-niiLISP covers the core read/write/directory-navigation path solidly. The genuine gaps are unbound builtins (`copy-file`, `read-char`, `write-char`, `device`, `dump`, `pretty-print`, `search`, and no-arg `env`), a no-op `save` (writes an empty file), and `file-info` returning a different field layout than the book.
+niiLISP covers the core read/write/directory-navigation path solidly. The genuine gaps are unbound builtins (`copy-file`, `read-char`, `write-char`, `device`, `dump`, `pretty-print`, `search`, and no-arg `env`) and `file-info` returning a different field layout than the book.
 
-**Coverage: 24 ✅ / 4 ⚠️ / 8 ❌**
+**Coverage: 25 ✅ / 3 ⚠️ / 8 ❌**  *(updated: no-arg `save` dumps the workspace)*
 
 > Corrections (verified against the newLISP 10.7.5 manual): `file?` returning `true` for directories is **correct** — the manual states *"This function will also return true for directories"* (pass the optional `true` flag to require a non-directory). And niiLISP's `(write-line handle str)` argument order **matches** newLISP (`(write-line [int-file [str]])`, handle first); the only real gap is the convenience form that omits the handle. Both re-classified.
 
@@ -36,7 +36,7 @@ niiLISP covers the core read/write/directory-navigation path solidly. The genuin
 | `seek` | ✅ | `(seek f offset)` repositions, `(seek f)` with no offset returns current position; both work. |
 | `device` | ❌ | Symbol unbound; `(device 0)` errors `not a function: nil` — no output-redirection support at all. |
 | `load` | ✅ | Loads and evaluates a `.lsp` file, definitions take effect. |
-| `save` | ⚠️ | Returns `true` and creates the target file, but the file is always **empty (0 bytes)** — no source is actually serialized. Present but non-functional. |
+| `save` | ✅ | `(save file sym…)` and the no-arg `(save file)` (dumps the whole workspace) both serialize loadable source (fixed 2026-07-06) |
 | `source` | ✅ | `(source 'foo)` returns the function's source as a string (`(set 'foo (lambda (y) (+ y 1)))`); note the *quoted*-symbol form is required — `(source foo)` (unquoted) errors `save/source: expected symbols`. |
 | `main-args` | ✅ | Full list, `((main-args) n)` indexing, and `(main-args n)` call form all return correct values. |
 | Recursive directory scan (`directory` + `directory?` + `dolist`) | ✅ | The book's `search-tree` recursive-descent idiom works verbatim, including regex-filtered listing and correct recursion into subdirectories. |
@@ -118,15 +118,12 @@ $ ./target/release/niilisp -e '(device 0)'
 niilisp: not a function: nil
 ```
 
-### `save` runs without error but writes an empty file (⚠️, effectively non-functional)
+### ~~`save` writes an empty file with no symbol args~~ — FIXED 2026-07-06
 
-```
-$ ./target/release/niilisp -e "(set 'x 42) (define (foo y) (+ y 1)) (println (save \"testdir/saved2.lsp\"))"
-true
-$ wc -c testdir/saved2.lsp
-       0 testdir/saved2.lsp
-```
-`save` reports success (`true`) and creates the target file, but never serializes any definitions into it — the file is always 0 bytes. Contrast with `source`, which does correctly serialize a single named function to a string.
+`(save file)` with no symbols now dumps the whole workspace (all user-defined
+MAIN symbols and contexts, excluding built-ins, `$`-system symbols, and unset
+symbols); `(save file sym…)` dumps just the named ones. Both round-trip through
+`load`.
 
 ### `dump`, `pretty-print`, `search` are unbound (❌)
 

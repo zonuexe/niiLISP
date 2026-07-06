@@ -118,3 +118,29 @@ fn filesystem_operations() {
         assert!(out.contains(expect), "missing `{}` in:\n{}", expect, out);
     }
 }
+
+/// `(save file)` with no symbol arguments dumps the whole workspace so that
+/// `load` restores it — a plain value, a lambda, and a context member.
+#[test]
+fn save_whole_workspace_roundtrips() {
+    let src = r##"
+(set 'answer 42)
+(define (sq n) (* n n))
+(context 'Pt)
+(set 'Pt:a 1)
+(context MAIN)
+(save "<DIR>/ws.lsp")
+;; Clear the bindings, then reload from the dump.
+(set 'answer nil)
+(set 'sq nil)
+(load "<DIR>/ws.lsp")
+(println "answer=" answer)
+(println "sq=" (sq 5))
+(println "pt=" Pt:a)
+(exit)
+"##;
+    let out = run_program("save-ws", src);
+    for expect in ["answer=42", "sq=25", "pt=1"] {
+        assert!(out.contains(expect), "missing `{}` in:\n{}", expect, out);
+    }
+}
