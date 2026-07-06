@@ -2,7 +2,7 @@
 
 niiLISP covers the core read/write/directory-navigation path solidly. The genuine gaps are unbound builtins (`copy-file`, `read-char`, `write-char`, `device`, `dump`, `pretty-print`, `search`, and no-arg `env`) and `file-info` returning a different field layout than the book.
 
-**Coverage: 25 ✅ / 3 ⚠️ / 8 ❌**  *(updated: no-arg `save` dumps the workspace)*
+**Coverage: 26 ✅ / 2 ⚠️ / 8 ❌**  *(updated: no-arg `save` dumps the workspace; `read-buffer` reclassified ✅)*
 
 > Corrections (verified against the newLISP 10.7.5 manual): `file?` returning `true` for directories is **correct** — the manual states *"This function will also return true for directories"* (pass the optional `true` flag to require a non-directory). And niiLISP's `(write-line handle str)` argument order **matches** newLISP (`(write-line [int-file [str]])`, handle first); the only real gap is the convenience form that omits the handle. Both re-classified.
 
@@ -26,7 +26,7 @@ niiLISP covers the core read/write/directory-navigation path solidly. The genuin
 | `read-line` | ✅ | Both `(read-line handle)` and no-arg stdin form work; loop-until-nil idiom works. |
 | `current-line` | ✅ | Returns the line most recently read by `read-line`, as in the book's filter idiom. |
 | `read-char` | ❌ | Symbol unbound; errors `not a function: nil`. |
-| `read-buffer` | ⚠️ | Works only with a pre-bound *unquoted* symbol as the buffer arg (`(read-buffer f buf 5)`); the book's documented quoted-symbol form `(read-buffer f 'buf n)` errors `not an indexable place`. |
+| `read-buffer` | ✅ | `(read-buffer handle sym size)` with an unquoted symbol (fresh or bound) — this *is* newLISP's place convention (`read`/`read-buffer` take the buffer symbol unquoted, like `set`); the report's `'buf` test was wrong. |
 | `read-file` | ✅ | Reads entire file into a string, matches book output. |
 | `write-line` | ⚠️ | `(write-line handle str)` works and matches newLISP's handle-first order; only the handle-less convenience form (`(write-line "text")` → current device) is unsupported (errors `expected an integer`). |
 | `write-buffer` | ✅ | `(write-buffer handle str)` writes and returns the byte count. |
@@ -78,18 +78,14 @@ $ ./target/release/niilisp -e "(set 'f (open \"testdir/sample.txt\" \"read\")) (
 niilisp: not a function: nil
 ```
 
-### `read-buffer` rejects the book's quoted-symbol form (⚠️)
+### ~~`read-buffer` quoted-symbol form~~ — not a divergence
 
-Book/newLISP idiom is `(read-buffer file-handle 'buffer-symbol size)`.
-
+newLISP's `read`/`read-buffer` take the buffer symbol **unquoted** (it is a
+destructive place, like `set`), which is exactly what niiLISP requires. A fresh
+(unbound) symbol works too:
 ```
-$ ./target/release/niilisp -e "(set 'f (open \"testdir/sample.txt\" \"read\")) (set 'buf \"\") (println (read-buffer f 'buf 5))"
-niilisp: not an indexable place
-```
-Workaround that does work in niiLISP — pass the symbol unquoted:
-```
-$ ./target/release/niilisp -e "(set 'f (open \"testdir/sample.txt\" \"read\")) (set 'buf \"\") (read-buffer f buf 5) (println buf)"
-line1
+$ niilisp -e "(set 'f (open \"d\" \"read\")) (read-buffer f buf 3) (println buf)"
+ABC
 ```
 
 ### `write-line` has no handle-less (current-device) form (⚠️)
