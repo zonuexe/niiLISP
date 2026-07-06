@@ -50,6 +50,11 @@ mt = ["dep:libc"]
 # receive/select over TCP and Unix-domain sockets. Real sockets via libc; Unix-
 # only (cfg'd out on non-Unix even when on). Off via --no-default-features.
 net = ["dep:libc"]
+# Native GUI helper (ADR-0034): builds the `niilisp-gui` fltk binary that the
+# `gs:` module drives over a socket. Default OFF — the toolkit is a heavy,
+# display-dependent, niche dependency confined to the helper binary; the
+# interpreter never links it.
+gui = ["dep:fltk"]
 
 # Optional pure-Rust deps behind the features above (all cross-compile cleanly,
 # unlike the system-libffi FFI slice).
@@ -57,6 +62,15 @@ net = ["dep:libc"]
 num-bigint = { version = "0.4", optional = true }
 num-traits = { version = "0.2", optional = true }
 regex = { version = "1", optional = true }
+# GUI toolkit for the `niilisp-gui` helper only (ADR-0034); never linked into
+# the interpreter. Bundled build, so no system toolkit is required.
+fltk = { version = "1.4", optional = true, features = ["fltk-bundled"] }
+
+# The GUI helper binary — only built with the `gui` feature (ADR-0034). The
+# interpreter (`src/main.rs`) is the default bin and never pulls fltk.
+[[bin]]
+name = "niilisp-gui"
+required-features = ["gui"]
 
 # FFI is Unix-only in the first slice (ADR-0018 revision): it links the system
 # libffi, which is OS-provided on macOS/Linux. On non-Unix targets the `ffi`
