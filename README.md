@@ -8,7 +8,7 @@ This project is not affiliated with newLISP or Nuevatec. "newLISP" and "Nuevatec
 
 ## Status
 
-Usable for small scripts. niiLISP has a reader (three string syntaxes, numbers, quote, comments), a tree-walking evaluator with dynamic scoping and **contexts as switchable namespaces** (`context`/`dotree`/`term`), ORO value semantics with **copy-on-write** sharing, FOOP objects with reference `self`, `catch`/`throw`, and newLISP's reference/place model for destructive operations. Values include integers, IEEE-754 floats, arbitrary-precision **bigints**, binary-safe strings with **UTF-8 character operations**, lists, and fixed-length **arrays**. Lambdas are **list data** (build functions with `append`/`expand`/`args`), matching newLISP's code-as-data idiom. It has a large builtin set (arithmetic, comparisons, lists/arrays, higher-order, strings, `format`, bitwise, a seedable RNG) and `import`/**FFI** for calling C functions with the struct/`pack` memory API and `callback`s (Unix). It passes the vendored `qa-exception`, `qa-foop`, `qa-nullstring`, `qa-bigint`, `qa-longnum`, and `qa-utf8` suites. Not yet implemented: networking, regular expressions, Unicode case folding, and Windows FFI. The language niiLISP accepts is described in the specification under [`docs/spec/`](docs/spec/) (start at [`syntax.md`](docs/spec/syntax.md)); design decisions live under [`docs/adr/`](docs/adr/).
+Usable for real scripts. niiLISP has a reader (three string syntaxes, numbers, quote, comments), a tree-walking evaluator with dynamic scoping and **contexts as switchable namespaces** (`context`/`dotree`/`term`) that double as **dictionaries** (contexts-as-hashes), ORO value semantics with **copy-on-write** sharing, FOOP objects with reference `self`, `catch`/`throw`, and newLISP's reference/place model for destructive operations. Values include integers, IEEE-754 floats, arbitrary-precision **bigints**, binary-safe strings with **UTF-8 character operations** and **regular expressions** (RE2-style) + Unicode case folding, lists, and fixed-length **arrays**. Lambdas are **list data** (build functions with `append`/`expand`/`args`), matching newLISP's code-as-data idiom. Beyond a large builtin set (arithmetic, comparisons, lists/arrays, higher-order, strings, `format`, bitwise, a seedable RNG, `parse`, `eval-string`) it has: `import`/**FFI** for calling C functions with the struct/`pack` memory API and `callback`s (Unix); **file I/O** and **external processes** (`process`/`exec`); the fork-based **Cilk API** and message passing (`spawn`/`sync`/`share`/`send`/`receive`/`signal`, Unix); **networking** (`net-*` stream sockets, Unix); and a native, `gs:`-inspired **GUI** helper (fltk, no JVM; behind an opt-in `gui` feature). It passes the vendored `qa-exception`, `qa-foop`, `qa-nullstring`, `qa-bigint`, `qa-longnum`, `qa-utf8`, `qa-utf8-ext`, `qa-dictionary`, `qa-cilk`, `qa-share`, `qa-pipefork`, `qa-message`, `qa-siguser`, and `qa-local-domain` suites. Not yet: UDP / HTTP / `net-eval` server mode, Windows FFI, and richer GUI widgets/layouts. The language niiLISP accepts is described in the specification under [`docs/spec/`](docs/spec/) (start at [`syntax.md`](docs/spec/syntax.md)); design decisions live under [`docs/adr/`](docs/adr/).
 
 ## Build
 
@@ -35,7 +35,8 @@ niilisp -e '(println (+ 1 2))'  # evaluate an expression
 echo '(println 42)' | niilisp - # read a script from stdin
 niilisp                         # start an interactive REPL
 niilisp --help                  # print usage
-niilisp --version               # print version
+niilisp --version               # print version, copyright, and a license pointer
+niilisp license                 # print the open-source licenses (niilisp + deps)
 ```
 
 ## Examples
