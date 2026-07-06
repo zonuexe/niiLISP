@@ -3253,6 +3253,14 @@ mod tests {
     }
 
     #[test]
+    fn list_count_select_setops() {
+        assert!(is_true("(= (count '(a b) '(a b a b b)) '(2 3))"));
+        assert!(is_true("(= (select '(a b c d e) '(0 2 -1)) '(a c e))"));
+        assert!(is_true("(= (difference '(1 2 3 2 4) '(2 4)) '(1 3))"));
+        assert!(is_true("(= (intersect '(1 2 3 2) '(2 3 5)) '(2 3))"));
+    }
+
+    #[test]
     fn parse_splits() {
         assert!(is_true("(= (parse \"  a  b c \") '(\"a\" \"b\" \"c\"))"));
         assert!(is_true(

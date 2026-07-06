@@ -61,6 +61,10 @@ pub fn install(interp: &Interp) {
     reg("base64-enc", b_base64_enc);
     reg("base64-dec", b_base64_dec);
     reg("parse", b_parse);
+    reg("count", b_count);
+    reg("select", b_select);
+    reg("difference", b_difference);
+    reg("intersect", b_intersect);
     reg("NaN?", is_nan_p);
     reg("inf?", is_inf_p);
     reg("int", b_int);
@@ -657,6 +661,75 @@ fn b_parse(interp: &Interp, args: &[Value]) -> Result<Value, Signal> {
         }
         _ => Err(Signal::error("parse: separator must be a string")),
     }
+}
+
+/// Borrow a value as a list slice (an array counts as a list; `nil` is empty).
+fn list_slice<'a>(v: Option<&'a Value>, what: &str) -> Result<&'a [Value], Signal> {
+    match v {
+        Some(Value::List(l)) | Some(Value::Array(l)) => Ok(l),
+        Some(Value::Nil) | None => Ok(&[]),
+        _ => Err(Signal::error(format!("{}: expected a list", what))),
+    }
+}
+
+/// `(count keys values)` — for each element of `keys`, how many times it occurs
+/// in `values`.
+fn b_count(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    let keys = list_slice(args.first(), "count")?;
+    let values = list_slice(args.get(1), "count")?;
+    Ok(Value::list(
+        keys.iter()
+            .map(|k| Value::Int(values.iter().filter(|v| values_equal(v, k)).count() as i64))
+            .collect(),
+    ))
+}
+
+/// `(select seq indices)` / `(select seq i j …)` — the elements of `seq` at the
+/// given indices (a negative index counts from the end).
+fn b_select(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    let list = list_slice(args.first(), "select")?;
+    let indices: Vec<i64> = match args.get(1) {
+        Some(Value::List(idx)) | Some(Value::Array(idx)) => {
+            idx.iter().map(to_i64).collect::<Result<_, _>>()?
+        }
+        _ => args[1..].iter().map(to_i64).collect::<Result<_, _>>()?,
+    };
+    let n = list.len() as i64;
+    Ok(Value::list(
+        indices
+            .iter()
+            .filter_map(|&i| {
+                let k = if i < 0 { n + i } else { i };
+                usize::try_from(k).ok().and_then(|u| list.get(u)).cloned()
+            })
+            .collect(),
+    ))
+}
+
+/// `(difference a b)` — the elements of `a` not in `b`, with duplicates removed.
+fn b_difference(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    let a = list_slice(args.first(), "difference")?;
+    let b = list_slice(args.get(1), "difference")?;
+    let mut out: Vec<Value> = Vec::new();
+    for x in a {
+        if !b.iter().any(|y| values_equal(y, x)) && !out.iter().any(|y| values_equal(y, x)) {
+            out.push(x.clone());
+        }
+    }
+    Ok(Value::list(out))
+}
+
+/// `(intersect a b)` — the elements of `a` also in `b`, with duplicates removed.
+fn b_intersect(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    let a = list_slice(args.first(), "intersect")?;
+    let b = list_slice(args.get(1), "intersect")?;
+    let mut out: Vec<Value> = Vec::new();
+    for x in a {
+        if b.iter().any(|y| values_equal(y, x)) && !out.iter().any(|y| values_equal(y, x)) {
+            out.push(x.clone());
+        }
+    }
+    Ok(Value::list(out))
 }
 
 fn b_abs(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
