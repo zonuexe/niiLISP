@@ -70,17 +70,23 @@ round-trip binary strings). Candidates, roughly by value:
   `pipe`/`wait-pid` + `write-line` + `do-until`/`do-while` → `qa-pipefork` ✓; **B4**
   `send`/`receive` (datagram socketpairs) + `sys-info -3`/`-4` → `qa-message` ✓;
   **B5** `signal` (async-safe, polled at eval safe points) → `qa-siguser` ✓.
-  **Deferred:** `qa-msgbig` (80 KB messages need `base64-enc` + `SOCK_STREAM`
-  framing — a `SOCK_DGRAM` can't carry them); `qa-pipe` (uses an external
-  `./newlisp` binary); the `process` stdio-fd redirection args.
+  **Deferred:** `qa-msgbig` (`base64-enc` now exists, but the 80 KB messages
+  still need a `SOCK_STREAM` + length-framed transport — a `SOCK_DGRAM` can't
+  carry them); `qa-pipe` (uses an external `./newlisp` binary); the `process`
+  stdio-fd redirection args.
 - **Networking** (`net-connect`/`net-listen`/`net-accept`/`net-send`/`net-receive`/
   `net-select`, then UDP/HTTP/`net-eval`) — the other GUI enabler; grilled ADR.
   Unlocks `qa-net`/`qa-udp`/`qa-local-domain`.
 - **qa-ref tail** — string-byte places (`(setf (s 3) "D")`), `eval`/loop
   place-returns. Touches the place model; scope first.
-- **Independent leaves** (schedule when a target needs them): XML/JSON
-  (`xml-parse`/`json-parse`), dates (`date`/`now`/`date-value`), `parse`, rounding
-  (`ceil`/`floor`/`round`/`sgn`), `bits`, matrix/stats math.
+- **Independent leaves** — **done:** `parse`, rounding/sign
+  (`ceil`/`floor`/`round`/`sgn`), hyperbolic/`atan2` trig, `bits`,
+  `base64-enc`/`base64-dec`, list ops (`count`/`select`/`difference`/`intersect`),
+  reflection predicates (`context?`/`lambda?`/`macro?`/`primitive?`/`bigint?`/
+  `protected?`), `title-case`. **Remaining:** XML/JSON (`xml-parse`/`json-parse`),
+  dates (`date`/`now`/`date-value` — need timezone handling), symbol reflection
+  (`sym`/`symbols`/`name`/`prefix`), reference/query (`ref`/`ref-all`/`match`/
+  `unify`/`find-all`), binding forms (`letn`/`letex`/`bind`), matrix/stats math.
 
 **Windows note:** `qa-utf16path` needs faithful UTF-16 path handling (file I/O
 currently does lossy UTF-8 on Windows, binary-safe on Unix — ADR-0029). A future
