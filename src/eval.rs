@@ -128,6 +128,10 @@ pub struct Interp {
     /// The most recent `read-line` result, for `(current-line)` — a single
     /// interpreter-global buffer, as in newLISP (ADR-0029).
     current_line: RefCell<Vec<u8>>,
+    /// The current context at eval time, switched by `(context X)` and returned
+    /// by the no-arg `(context)` (ADR-0026). Symbol qualification itself is a
+    /// read-time concern; this tracks the runtime view for reflection.
+    current_ctx: RefCell<SymId>,
     /// Cilk API state: the pending `spawn`ed children and `share`d pages
     /// (ADR-0032). Present only in the Unix `mt` build.
     #[cfg(all(feature = "mt", unix))]
@@ -265,11 +269,13 @@ impl Interp {
             regex_cache: RefCell::new(HashMap::new()),
             files: RefCell::new(crate::fileio::FileTable::new()),
             current_line: RefCell::new(Vec::new()),
+            current_ctx: RefCell::new(0),
             #[cfg(all(feature = "mt", unix))]
             cilk: RefCell::new(crate::process::CilkState::default()),
             #[cfg(all(feature = "mt", unix))]
             signal_handlers: RefCell::new(HashMap::new()),
         };
+        *interp.current_ctx.borrow_mut() = interp.intern("MAIN");
         builtins::install(&interp);
         crate::ffi::install(&interp);
         crate::fileio::install(&interp);
@@ -1526,13 +1532,38 @@ impl Interp {
     }
 
     fn sf_context(&self, args: &[Value]) -> Result<Value, Signal> {
-        // (context 'X) / (context X). The reader has already switched the current
-        // context for symbol qualification (ADR-0026); at runtime we register the
-        // context value so `X` evaluates to it (for dotree etc.), and return it.
+        // (context) with no argument returns the current context (ADR-0026).
+        if args.is_empty() {
+            return Ok(Value::Context(*self.current_ctx.borrow()));
+        }
         let cid = self.context_target(args.first())?;
         if self.sym_name(cid) != "MAIN" && !matches!(self.lookup(cid), Value::Context(_)) {
             self.set_global(cid, Value::Context(cid));
         }
+        // (context ctx word [value]) creates a symbol `ctx:word` (a nil-free
+        // way to build data structures) and optionally sets its value, returning
+        // the symbol. `word` is a string or a symbol whose term is used.
+        if args.len() >= 2 {
+            let term = match self.eval(&args[1])? {
+                Value::Str(b) => String::from_utf8_lossy(&b).into_owned(),
+                Value::Symbol(id) => {
+                    let n = self.sym_name(id);
+                    n.rsplit(':').next().unwrap_or(&n).to_string()
+                }
+                other => self.repr(&other),
+            };
+            let qualified = self.intern(&format!("{}:{}", self.sym_name(cid), term));
+            if let Some(v) = args.get(2) {
+                let val = self.eval(v)?;
+                self.set_global(qualified, val);
+            }
+            return Ok(Value::Symbol(qualified));
+        }
+        // (context 'X) / (context X): switch the runtime current context. The
+        // reader has already switched it for symbol qualification; here we
+        // register the context value so `X` evaluates to it and track it for the
+        // no-arg query form.
+        *self.current_ctx.borrow_mut() = cid;
         Ok(Value::Context(cid))
     }
 

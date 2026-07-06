@@ -1,16 +1,16 @@
 # Ch. 6 — Contexts
 
-Core context mechanics (creation, `Ctx:sym` prefixing, `symbols`, `dotree`, dictionaries-via-functor, `save`/`load`, basic FOOP dispatch) work, but several documented forms are broken or incomplete: the no-arg `(context)` query, the 3-arg `(context 'Ctx key val)` create-and-set shortcut, `def-new`, full implicit-context registration, and `:`-dispatch on a zero-arg inline FOOP constructor call.
+Core context mechanics (creation, `Ctx:sym` prefixing, `symbols`, `dotree`, dictionaries-via-functor, `save`/`load`, basic FOOP dispatch) work, along with the `(context)` query and `(context 'Ctx key val)` create/set forms. Remaining gaps: `def-new`, the `(define Ctx:Ctx)` empty-dictionary one-liner, full implicit-context registration for `context?`, and `:`-dispatch on a zero-arg inline FOOP constructor call.
 
-**Coverage: 12 ✅ / 2 ⚠️ / 4 ❌**
+**Coverage: 15 ✅ / 1 ⚠️ / 2 ❌**  *(updated: `(context)` no-arg and `(context 'Ctx key val)`)*
 
 | Feature | Status | Notes |
 |---|---|---|
 | `(context 'Name)` — create/switch context | ✅ | Returns context name symbol as documented |
-| `(context)` — query current context, no args | ❌ | Errors instead of returning current context symbol |
+| `(context)` — query current context, no args | ✅ | Returns the current context symbol; tracks `(context X)` switches (fixed 2026-07-06) |
 | `Ctx:sym` prefixed access/assignment | ✅ | Read and write both work |
-| `(context 'Ctx key val)` create+set shortcut | ❌ | Silently no-ops; value never set, context not even registered |
-| `(context 'Ctx key)` retrieval form | ⚠️ | Returns the context name symbol itself, not the symbol's value |
+| `(context 'Ctx key val)` create+set shortcut | ✅ | Creates & sets `Ctx:key`, registers the context (fixed 2026-07-06) |
+| `(context 'Ctx key)` create form | ✅ | Returns the created symbol `Ctx:key` — the newLISP semantics (this form creates a symbol, it is not a value getter; use `(Ctx key)` or `Ctx:key` to read) |
 | `symbols` | ✅ | Correct list of `Ctx:sym` symbols, in both quoted/unquoted-bound forms |
 | `dotree` | ✅ | Iterates context symbols correctly |
 | `term` | ✅ | Works on a symbol value (e.g. from `dotree`) |
@@ -33,38 +33,33 @@ Core context mechanics (creation, `Ctx:sym` prefixing, `symbols`, `dotree`, dict
 
 ## Divergences & gaps
 
-### ❌ `(context)` with no arguments errors instead of returning current context
+### ~~`(context)` with no arguments~~ — FIXED 2026-07-06
+
+`(context)` returns the current context symbol, and a runtime field tracks
+`(context X)` switches:
+```
+$ niilisp -e '(context (quote FOO))(println (context))'
+FOO
+```
+
+### ~~`(context 'Ctx key val)` create-and-set shortcut~~ — FIXED 2026-07-06
 
 ```
-$ niilisp -e '(println (context))'
-niilisp: context: missing name
+$ niilisp -e "(context 'Doyle 'villain \"moriarty\")(println Doyle:villain \" \" (context? 'Doyle))"
+moriarty true
 ```
-Book: `(context)` alone returns the current context symbol (e.g. `MAIN`).
+The form creates `Doyle:villain`, sets it, registers the `Doyle` context, and
+returns the created symbol. `word` may be a string or a (quoted) symbol.
 
-### ❌ `(context 'Ctx key val)` create-and-set shortcut silently does nothing
+### `(context 'Ctx key)` — a symbol creator, not a value getter
 
-```lisp
-(println (context 'Doyle "villain" "moriarty"))
-(println (context? 'Doyle))
-(println Doyle:villain)
+Per the manual, `(context sym-context str|sym)` **creates and returns the
+symbol** `Ctx:key` — it is not a value accessor. niiLISP now does this:
 ```
-Output:
+$ niilisp -e "(println (context 'Doyle 'hero))"
+Doyle:hero
 ```
-Doyle
-nil
-nil
-```
-Expected (per book): returns `"moriarty"`, `Doyle:villain` is set, and `Doyle` becomes a real context. Instead the extra arguments are ignored, the value is never stored, and the context isn't even registered (`context?` is `nil` right after).
-
-### ⚠️ `(context 'Ctx key)` retrieval form returns the context symbol, not the value
-
-```lisp
-(context 'Doyle)
-(set 'Doyle:hero "holmes")
-(context 'MAIN)
-(println (context 'Doyle 'hero))
-```
-Output: `Doyle` (should be `holmes` per book, mirroring `Doyle:hero`).
+To read a value use `Ctx:key` directly or the dictionary form `(Ctx key)`.
 
 ### ❌ `(define Ctx:Ctx)` empty-dictionary declaration doesn't create the context
 
