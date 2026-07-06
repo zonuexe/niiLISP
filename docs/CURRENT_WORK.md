@@ -57,13 +57,14 @@ long-horizon target we do **not** schedule (newLISP-GS needs process + net + a
 Java `guiserver.jar`; its `eval-string`-driven socket substrate is three unbuilt
 subsystems). Near term we build the shared foundation the GUI *also* needs.
 
-**GUI-substrate status:** the three subsystems are now **done** — file I/O
-(`load`/`env`, ADR-0029), external processes (`process`, ADR-0031), and stream
-sockets (`net-connect`/`net-listen`/`net-send`/`net-receive`/`net-select`,
-ADR-0033), plus `base64-enc`. The remaining substrate piece is **`eval-string`**
-(read+eval a string — guiserver dispatches inbound events that way); after that
-the GUI would be integration: vendor `guiserver.lsp` and `load` it (needs a JVM +
-`guiserver.jar` at runtime). Still not *scheduled*, but no longer far.
+**GUI-substrate status: complete.** All of newLISP-GS's substrate primitives now
+exist — file I/O (`load`/`env`, ADR-0029), external processes (`process`,
+ADR-0031), stream sockets (`net-connect`/`net-listen`/`net-send`/`net-receive`/
+`net-select`, ADR-0033), `base64-enc`, and **`eval-string`** (the inbound-event
+dispatch path). Reaching the GUI is now pure integration: vendor `guiserver.lsp`
+and `load` it (needs a JVM + `guiserver.jar` at runtime), then verify the `gs:*`
+calls drive the Java server. Still not *scheduled* here, but the language side is
+ready — a candidate to promote from "long-horizon" to a real slice.
 
 Done so far: file I/O (ADR-0029, handles + filesystem + `save`/`load`/`source`),
 dictionaries (ADR-0030, `qa-dictionary` passes and is wired), **external processes**
