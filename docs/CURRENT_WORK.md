@@ -34,12 +34,13 @@ what is deliberately deferred, so work can resume without re-deriving context.
   nil-default-functor context as a hash (`(Ctx key [val])`/`(Ctx assoc)`/`(Ctx)`),
   with `new` copying prototypes and the predefined `Class` marker keeping FOOP
   construction distinct, plus `delete`/`sys-info`/`randomize`.
-- Tests: 65 unit + 16 integration (`qa-exception`, `qa-foop`, `qa-dictionary`,
+- Tests: 65 unit + qa integration (`qa-exception`, `qa-foop`, `qa-dictionary`,
   `qa-nullstring`, `qa-bigint`, `qa-longnum`, `qa-utf8`, `qa-utf8-char-regex`,
-  `qa-utf8-special`, `qa-utf8-compile`, `qa-utf8-ext`, `qa-factorfibo`
-  [`#[ignore]`d — slow sieve], three hermetic `fileio` tests, and two hermetic
-  `ffi` tests); the suite passes under both default features and
-  `--no-default-features`.
+  `qa-utf8-special`, `qa-utf8-compile`, `qa-utf8-ext`, and the Cilk/process
+  oracles `qa-cilk`/`qa-share`/`qa-pipefork`/`qa-message`/`qa-siguser`;
+  `qa-factorfibo` `#[ignore]`d — slow sieve) + three hermetic `fileio` tests,
+  three `process` tests, and two hermetic `ffi` tests; the suite passes under
+  both default features and `--no-default-features`.
 - Standard-library fill-ins (byte-based, no UTF-8 dependency): string builtins
   `upper-case`/`lower-case`/`trim`/`slice`/`find`/`explode`/`chop`, the RNG
   (`seed`/`rand`/`random`/`amb`), `main-args`, the list/number builtins
@@ -62,15 +63,16 @@ dictionaries (ADR-0030, `qa-dictionary` passes and is wired), **external process
 **binary-safe string repr** (ADR-0032 prerequisite — `save`/`source`/REPL now
 round-trip binary strings). Candidates, roughly by value:
 
-- **Cilk / fork multitasking** (ADR-0032) — real Unix `fork()` of the interpreter
-  behind a default-on `mt` feature (`libc` dep), bounded unsafe; cross-process
-  values transfer as re-readable `repr`. **B1–B3 done and wired:** **B1**
-  spawn/sync/abort/fork → `qa-cilk` ✓; **B2** `share` (mmap) → `qa-share` ✓;
-  **B3** `pipe`/`wait-pid` + `write-line` + `do-until`/`do-while` → `qa-pipefork`
-  ✓ (`qa-pipe` uses an external `./newlisp` binary, N/A). **Remaining:** **B4**
-  `send`/`receive` (socketpair per message-enabled child; non-blocking; needs
-  `sys-info -3`/`-4` = this/parent pid) → `qa-message`/`qa-msgbig`; **B5**
-  `signal` + `exec`-with-`signal` → `qa-siguser`.
+- **Cilk / fork multitasking** (ADR-0032) — **done and wired.** Real Unix
+  `fork()` of the interpreter behind a default-on `mt` feature (`libc` dep),
+  bounded unsafe; cross-process values transfer as re-readable `repr`. **B1**
+  spawn/sync/abort/fork → `qa-cilk` ✓; **B2** `share` (mmap) → `qa-share` ✓; **B3**
+  `pipe`/`wait-pid` + `write-line` + `do-until`/`do-while` → `qa-pipefork` ✓; **B4**
+  `send`/`receive` (datagram socketpairs) + `sys-info -3`/`-4` → `qa-message` ✓;
+  **B5** `signal` (async-safe, polled at eval safe points) → `qa-siguser` ✓.
+  **Deferred:** `qa-msgbig` (80 KB messages need `base64-enc` + `SOCK_STREAM`
+  framing — a `SOCK_DGRAM` can't carry them); `qa-pipe` (uses an external
+  `./newlisp` binary); the `process` stdio-fd redirection args.
 - **Networking** (`net-connect`/`net-listen`/`net-accept`/`net-send`/`net-receive`/
   `net-select`, then UDP/HTTP/`net-eval`) — the other GUI enabler; grilled ADR.
   Unlocks `qa-net`/`qa-udp`/`qa-local-domain`.
