@@ -56,13 +56,20 @@ long-horizon target we do **not** schedule (newLISP-GS needs process + net + a
 Java `guiserver.jar`; its `eval-string`-driven socket substrate is three unbuilt
 subsystems). Near term we build the shared foundation the GUI *also* needs.
 
-The three grilled foundation slices are **done** (ADR-0029/0030): file I/O
-(handles + filesystem + `save`/`load`/`source`) and dictionaries; `qa-dictionary`
-passes and is wired. Candidates, roughly by value:
+Done so far: file I/O (ADR-0029, handles + filesystem + `save`/`load`/`source`),
+dictionaries (ADR-0030, `qa-dictionary` passes and is wired), **external processes**
+(ADR-0031: `process`/`exec`/`!`/`sleep`, cross-platform, always-on), and
+**binary-safe string repr** (ADR-0032 prerequisite — `save`/`source`/REPL now
+round-trip binary strings). Candidates, roughly by value:
 
-- **Processes** (`process`/`exec`/`pipe`/`fork`/`spawn`/`sync`/`share`) — the next
-  GUI-enabling subsystem; needs a grilled ADR (portability, the ORO value-passing
-  story for `share`/`spawn`). Unlocks `qa-share`/`qa-pipe`/`qa-cilk` etc.
+- **Cilk / fork multitasking** (ADR-0032, **designed, not yet implemented**) —
+  `spawn`/`sync`/`abort`/`share`/`send`/`receive`, raw `fork`/`pipe`/`wait-pid`,
+  `signal`. Real Unix `fork()` of the interpreter behind a default-on `mt` feature
+  (new `libc` dep), bounded unsafe; cross-process values transfer as re-readable
+  `repr` read as data. Implement in dependency-first sub-slices: **B1** spawn/sync/
+  abort → `qa-cilk`; **B2** `share` → `qa-share`; **B3** raw fork/pipe/wait-pid →
+  `qa-pipe`/`qa-pipefork`; **B4** send/receive → `qa-message`; **B5** signal+exec →
+  `qa-siguser`. (`sys-info -3`/`-4` = this/parent pid needed for B4.)
 - **Networking** (`net-connect`/`net-listen`/`net-accept`/`net-send`/`net-receive`/
   `net-select`, then UDP/HTTP/`net-eval`) — the other GUI enabler; grilled ADR.
   Unlocks `qa-net`/`qa-udp`/`qa-local-domain`.
