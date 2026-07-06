@@ -287,6 +287,21 @@ fn qa_message_passes() {
     );
 }
 
+/// `signal` (ADR-0032): install handlers for SIGUSR1/SIGUSR2, then `exec kill`
+/// to deliver them to self; each must fire the Lisp handler. The async C handler
+/// sets an atomic flag that the evaluator polls at safe points. `mt`-gated; slow
+/// (it sleeps between signals).
+#[cfg(all(feature = "mt", unix))]
+#[test]
+fn qa_siguser_passes() {
+    let stdout = run_qa("qa-siguser");
+    assert!(
+        stdout.contains("signal 30 was fired") && stdout.contains("signal 31 was fired"),
+        "qa-siguser handlers did not fire:\n{}",
+        stdout
+    );
+}
+
 #[test]
 fn qa_foop_passes() {
     let stdout = run_qa("qa-foop");

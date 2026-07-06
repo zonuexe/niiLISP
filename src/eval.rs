@@ -131,6 +131,10 @@ pub struct Interp {
     /// (ADR-0032). Present only in the Unix `mt` build.
     #[cfg(all(feature = "mt", unix))]
     cilk: RefCell<crate::process::CilkState>,
+    /// The Lisp handler installed for each OS signal number by `signal`
+    /// (ADR-0032). Fired at safe points by `dispatch_signals`.
+    #[cfg(all(feature = "mt", unix))]
+    signal_handlers: RefCell<HashMap<i32, Value>>,
 }
 
 /// Pops the `args` stack when a call returns (including on error unwind),
@@ -262,6 +266,8 @@ impl Interp {
             current_line: RefCell::new(Vec::new()),
             #[cfg(all(feature = "mt", unix))]
             cilk: RefCell::new(crate::process::CilkState::default()),
+            #[cfg(all(feature = "mt", unix))]
+            signal_handlers: RefCell::new(HashMap::new()),
         };
         builtins::install(&interp);
         crate::ffi::install(&interp);
@@ -290,6 +296,12 @@ impl Interp {
     #[cfg(all(feature = "mt", unix))]
     pub fn cilk(&self) -> &RefCell<crate::process::CilkState> {
         &self.cilk
+    }
+
+    /// The registered `signal` handlers (ADR-0032).
+    #[cfg(all(feature = "mt", unix))]
+    pub fn signal_handlers(&self) -> &RefCell<HashMap<i32, Value>> {
+        &self.signal_handlers
     }
 
     /// Read the first form from `src` as **data** (no evaluation) — used to
@@ -441,6 +453,10 @@ impl Interp {
     fn eval_body(&self, body: &[Value]) -> Result<Value, Signal> {
         let mut result = Value::Nil;
         for form in body {
+            // A safe point to run any pending OS signal handlers (ADR-0032); the
+            // fast path is a single relaxed atomic load.
+            #[cfg(all(feature = "mt", unix))]
+            crate::process::dispatch_signals(self);
             result = self.eval(form)?;
         }
         Ok(result)

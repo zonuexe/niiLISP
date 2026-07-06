@@ -127,6 +127,7 @@ pub fn install(interp: &Interp) {
         interp.register_builtin("pipe", cilk::b_pipe);
         interp.register_builtin("wait-pid", cilk::b_wait_pid);
         interp.register_builtin("send", cilk::b_send);
+        interp.register_builtin("signal", cilk::b_signal);
         // `receive` is a place-taking special form (see `try_special_form`).
         // `spawn` is a special form (its expression runs in the child) — see
         // `try_special_form` / `cilk::sf_spawn`.
@@ -150,7 +151,7 @@ pub struct CilkState {
 
 /// `spawn`/`sync`/`abort`, forking the interpreter (ADR-0032).
 #[cfg(all(feature = "mt", unix))]
-pub use cilk::{receive_one, receive_ready, sf_fork, sf_spawn};
+pub use cilk::{dispatch_signals, receive_one, receive_ready, sf_fork, sf_spawn};
 
 #[cfg(all(feature = "mt", unix))]
 mod cilk {
@@ -452,6 +453,66 @@ mod cilk {
         }
         buf.truncate(n as usize);
         Some(interp.read_one(&buf))
+    }
+
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    /// Bitmask of OS signals delivered since the last dispatch (bit = signal
+    /// number). Set from the async signal handler — only an atomic `fetch_or`,
+    /// which is async-signal-safe (ADR-0032).
+    static PENDING: AtomicU64 = AtomicU64::new(0);
+
+    extern "C" fn os_signal_handler(sig: libc::c_int) {
+        if (0..64).contains(&sig) {
+            PENDING.fetch_or(1u64 << sig, Ordering::Relaxed);
+        }
+    }
+
+    /// `(signal n handler)` — run `handler` (a function of the signal number)
+    /// when OS signal `n` arrives; a nil handler restores the default. Returns
+    /// the previous handler. The handler runs at the next eval safe point, not
+    /// in async signal context.
+    pub fn b_signal(interp: &Interp, args: &[Value]) -> Result<Value, Signal> {
+        let n = to_i64(args.first().unwrap_or(&Value::Nil));
+        if !(0..64).contains(&n) {
+            return Err(Signal::error("signal: number out of range"));
+        }
+        let handler = args.get(1).cloned().unwrap_or(Value::Nil);
+        if matches!(handler, Value::Nil) {
+            interp.signal_handlers().borrow_mut().remove(&(n as i32));
+            unsafe { libc::signal(n as libc::c_int, libc::SIG_DFL) };
+            Ok(Value::Nil)
+        } else {
+            let prev = interp
+                .signal_handlers()
+                .borrow_mut()
+                .insert(n as i32, handler);
+            unsafe {
+                libc::signal(
+                    n as libc::c_int,
+                    os_signal_handler as *const () as usize as libc::sighandler_t,
+                )
+            };
+            Ok(prev.unwrap_or(Value::Nil))
+        }
+    }
+
+    /// Run any pending OS signal handlers (ADR-0032) — a safe point called from
+    /// `eval_body`. The fast path is a single relaxed load. Handler errors are
+    /// swallowed so an async signal never disrupts the main evaluation.
+    pub fn dispatch_signals(interp: &Interp) {
+        let mask = PENDING.swap(0, Ordering::Relaxed);
+        if mask == 0 {
+            return;
+        }
+        for sig in 0..64i32 {
+            if mask & (1u64 << sig) != 0 {
+                let handler = interp.signal_handlers().borrow().get(&sig).cloned();
+                if let Some(h) = handler {
+                    let _ = interp.call(&h, vec![Value::Int(i64::from(sig))]);
+                }
+            }
+        }
     }
 
     /// `(fork expr)` — fork; the child evaluates `expr` and `_exit`s (no result
