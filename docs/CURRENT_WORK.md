@@ -57,14 +57,18 @@ long-horizon target we do **not** schedule (newLISP-GS needs process + net + a
 Java `guiserver.jar`; its `eval-string`-driven socket substrate is three unbuilt
 subsystems). Near term we build the shared foundation the GUI *also* needs.
 
-**GUI-substrate status: complete.** All of newLISP-GS's substrate primitives now
-exist — file I/O (`load`/`env`, ADR-0029), external processes (`process`,
-ADR-0031), stream sockets (`net-connect`/`net-listen`/`net-send`/`net-receive`/
-`net-select`, ADR-0033), `base64-enc`, and **`eval-string`** (the inbound-event
-dispatch path). Reaching the GUI is now pure integration: vendor `guiserver.lsp`
-and `load` it (needs a JVM + `guiserver.jar` at runtime), then verify the `gs:*`
-calls drive the Java server. Still not *scheduled* here, but the language side is
-ready — a candidate to promote from "long-horizon" to a real slice.
+**GUI — first slice done (ADR-0034), no JVM.** Rather than ship newLISP's Java
+`guiserver.jar`, niiLISP has a **native, `gs:`-inspired GUI**: `lib/gui.lsp`
+drives a separate `niilisp-gui` **fltk** helper binary over a socket (reusing the
+`net-*` + `eval-string` substrate). Widgets so far: window/frame, label, button,
+text-field (vertical auto-layout) with click events. Behind a **default-off `gui`
+feature** (fltk bundled, linked only into the helper — the interpreter stays
+pure). Display-dependent, so CI covers only the protocol layer (`tests/gui.rs`);
+`examples/gui-demo.lsp` is the manual demo (`cargo build --features gui --bin
+niilisp-gui`, then `NIILISP_GUI=…/niilisp-gui`). The stance is **gs:-shaped, not
+bug-compatible** (a different toolkit than Swing). **Next GUI slices:** real
+layout managers (border/grid/flow), `gs:canvas` + drawing, more widgets/events,
+and reading widget state back (the demo's field→label round trip is stubbed).
 
 Done so far: file I/O (ADR-0029, handles + filesystem + `save`/`load`/`source`),
 dictionaries (ADR-0030, `qa-dictionary` passes and is wired), **external processes**
