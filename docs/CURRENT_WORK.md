@@ -34,13 +34,25 @@ what is deliberately deferred, so work can resume without re-deriving context.
   nil-default-functor context as a hash (`(Ctx key [val])`/`(Ctx assoc)`/`(Ctx)`),
   with `new` copying prototypes and the predefined `Class` marker keeping FOOP
   construction distinct, plus `delete`/`sys-info`/`randomize`.
+- **WikiBook coverage audit + divergence fixes** (2026-07-06,
+  [`notes/20260706_wikibook-coverage/`](notes/20260706_wikibook-coverage/)): ran
+  every worked example of the *Introduction to newLISP* WikiBook against the
+  binary (~221/314 work). Fixed the divergences it surfaced: the **`$idx`**
+  system iterator (dolist/dostring/dotree/map/while/until/do-while/do-until);
+  **`int`** nil/default-on-failure + base/prefix parsing; **`dup`** list flag;
+  **`<<`/`>>`** 1-arg + fold; **`round`** newLISP sign convention;
+  **`time-of-day`** ms-since-midnight; no-arg **`save`** dumps the workspace;
+  **regex capture vars `$0..$N`** + regex-mode `find`/`replace` with per-match
+  re-evaluation; and the **`(context)`** query and **`(context ctx word [value])`**
+  create/set forms.
 - Tests: 65 unit + qa integration (`qa-exception`, `qa-foop`, `qa-dictionary`,
   `qa-nullstring`, `qa-bigint`, `qa-longnum`, `qa-utf8`, `qa-utf8-char-regex`,
   `qa-utf8-special`, `qa-utf8-compile`, `qa-utf8-ext`, and the Cilk/process
   oracles `qa-cilk`/`qa-share`/`qa-pipefork`/`qa-message`/`qa-siguser`;
-  `qa-factorfibo` `#[ignore]`d — slow sieve) + three hermetic `fileio` tests,
-  three `process` tests, and two hermetic `ffi` tests; the suite passes under
-  both default features and `--no-default-features`.
+  `qa-factorfibo` `#[ignore]`d — slow sieve) + hermetic `fileio` tests, three
+  `process` tests, two hermetic `ffi` tests, and the WikiBook-audit regression
+  suites (`loop_idx`, `builtin_semantics`, `regex_captures`, `contexts`); ~118
+  tests total, passing under both default features and `--no-default-features`.
 - Standard-library fill-ins (byte-based, no UTF-8 dependency): string builtins
   `upper-case`/`lower-case`/`trim`/`slice`/`find`/`explode`/`chop`, the RNG
   (`seed`/`rand`/`random`/`amb`), `main-args`, the list/number builtins
@@ -51,7 +63,16 @@ what is deliberately deferred, so work can resume without re-deriving context.
 
 A gap analysis vs newLISP ([`notes/20260706_newlisp-gap-analysis.md`](notes/20260706_newlisp-gap-analysis.md))
 found ~221 of 378 primitives missing, clustered into whole unbuilt subsystems
-(file I/O, processes, networking, XML/JSON, dates). **North star (grilled): order
+(file I/O, processes, networking, XML/JSON, dates). The
+[WikiBook coverage report](notes/20260706_wikibook-coverage/) complements it as a
+living, example-driven backlog: the near-term divergences (⚠️) are now fixed, so
+what remains is **whole unimplemented subsystems (❌)** — best filled one planned
+slice at a time. Highest-value remaining ❌, roughly: **dates/times**
+(`date`/`now`/`date-value`/`date-parse`/`timer` — need timezone handling), small
+binding/HOF leaves (`letn`/`letex`, `global`, `find-all`/`ref`/`ref-all`/`match`,
+`curry`, `series`/`factor`), **XML/JSON** (`xml-parse`/`json-parse`), the
+**debugger** (`trace`/`debug`/`error-event`), and **HTTP/UDP**
+(`get-url`/`net-*-udp`). **North star (grilled): order
 by dependency, not by the GUI** — the *Graphical interface* chapter stays a
 long-horizon target we do **not** schedule (newLISP-GS needs process + net + a
 Java `guiserver.jar`; its `eval-string`-driven socket substrate is three unbuilt
@@ -161,8 +182,10 @@ since v0.2.0): `regex`/`regex-comp` on the pure-Rust `regex` crate (RE2-style, n
 PCRE — no backreferences/lookaround), behind a default-on `regex` feature, with an
 `Interp` compile cache and PCRE-option-bit mapping; `upper-case`/`lower-case` fold
 Unicode via the char layer. `qa-utf8-char-regex`/`qa-utf8-special`/`qa-utf8-compile`
-pass and are wired in. Deferred: `$0`/`$1` vars, regex on `replace`/`find`, PCRE
-features, and `bits` (for `qa-utf8-ext`).
+pass and are wired in. **`$0..$N` capture vars and regex on `find`/`replace` are
+now done** (2026-07-06 WikiBook audit; `Interp::set_regex_captures`, regex-mode
+`find`, per-match-re-evaluating string `replace`). Still deferred: PCRE features
+(backreferences/lookaround) and `bits` (for `qa-utf8-ext`).
 
 **Lambdas as list data** ([ADR-0027](adr/0027-lambda-as-list-hybrid.md)) — the
 release milestone: run the lambda-calculus gist

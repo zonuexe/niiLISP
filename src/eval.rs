@@ -128,6 +128,10 @@ pub struct Interp {
     /// The most recent `read-line` result, for `(current-line)` — a single
     /// interpreter-global buffer, as in newLISP (ADR-0029).
     current_line: RefCell<Vec<u8>>,
+    /// The current context at eval time, switched by `(context X)` and returned
+    /// by the no-arg `(context)` (ADR-0026). Symbol qualification itself is a
+    /// read-time concern; this tracks the runtime view for reflection.
+    current_ctx: RefCell<SymId>,
     /// Cilk API state: the pending `spawn`ed children and `share`d pages
     /// (ADR-0032). Present only in the Unix `mt` build.
     #[cfg(all(feature = "mt", unix))]
@@ -150,20 +154,20 @@ impl Drop for ArgsGuard<'_> {
 
 /// A dynamic-binding scope. On drop it restores every slot it changed, in
 /// reverse order — including on error unwind (ADR-0006).
-struct Scope<'a> {
+pub(crate) struct Scope<'a> {
     interp: &'a Interp,
     saved: Vec<(SymId, Option<Value>)>,
 }
 
 impl<'a> Scope<'a> {
-    fn new(interp: &'a Interp) -> Self {
+    pub(crate) fn new(interp: &'a Interp) -> Self {
         Scope {
             interp,
             saved: Vec::new(),
         }
     }
 
-    fn bind(&mut self, sym: SymId, val: Value) {
+    pub(crate) fn bind(&mut self, sym: SymId, val: Value) {
         let old = self.interp.globals.borrow_mut().insert(sym, val);
         self.saved.push((sym, old));
     }
@@ -265,11 +269,13 @@ impl Interp {
             regex_cache: RefCell::new(HashMap::new()),
             files: RefCell::new(crate::fileio::FileTable::new()),
             current_line: RefCell::new(Vec::new()),
+            current_ctx: RefCell::new(0),
             #[cfg(all(feature = "mt", unix))]
             cilk: RefCell::new(crate::process::CilkState::default()),
             #[cfg(all(feature = "mt", unix))]
             signal_handlers: RefCell::new(HashMap::new()),
         };
+        *interp.current_ctx.borrow_mut() = interp.intern("MAIN");
         builtins::install(&interp);
         crate::ffi::install(&interp);
         crate::fileio::install(&interp);
@@ -941,6 +947,20 @@ impl Interp {
         Ok(re)
     }
 
+    /// Bind the regex system variables `$0`..`$N` to the whole match and each
+    /// capture group, matching newLISP. They are ordinary globals that persist
+    /// until the next regex operation. A non-participating group binds to nil.
+    #[cfg(feature = "regex")]
+    pub(crate) fn set_regex_captures(&self, caps: &regex::bytes::Captures) {
+        for (i, m) in caps.iter().enumerate() {
+            let sym = self.intern(&format!("${}", i));
+            let v = m
+                .map(|mm| Value::str(mm.as_bytes().to_vec()))
+                .unwrap_or(Value::Nil);
+            self.set_global(sym, v);
+        }
+    }
+
     // ---- Special forms ---------------------------------------------------
 
     fn try_special_form(&self, name: &str, args: &[Value]) -> Option<Result<Value, Signal>> {
@@ -1176,9 +1196,18 @@ impl Interp {
         let cond = args
             .first()
             .ok_or_else(|| Signal::error("while: missing condition"))?;
+        let idx_sym = self.intern("$idx");
+        let mut scope = Scope::new(self);
+        scope.bind(idx_sym, Value::Int(0));
         let mut result = Value::Nil;
-        while self.eval(cond)?.is_truthy() {
+        let mut i: i64 = 0;
+        loop {
+            self.set_global(idx_sym, Value::Int(i));
+            if !self.eval(cond)?.is_truthy() {
+                break;
+            }
             result = self.eval_body(&args[1..])?;
+            i += 1;
         }
         Ok(result)
     }
@@ -1188,9 +1217,18 @@ impl Interp {
         let cond = args
             .first()
             .ok_or_else(|| Signal::error("until: missing condition"))?;
+        let idx_sym = self.intern("$idx");
+        let mut scope = Scope::new(self);
+        scope.bind(idx_sym, Value::Int(0));
         let mut result = Value::Nil;
-        while !self.eval(cond)?.is_truthy() {
+        let mut i: i64 = 0;
+        loop {
+            self.set_global(idx_sym, Value::Int(i));
+            if self.eval(cond)?.is_truthy() {
+                break;
+            }
             result = self.eval_body(&args[1..])?;
+            i += 1;
         }
         Ok(result)
     }
@@ -1203,9 +1241,15 @@ impl Interp {
         let cond = args
             .first()
             .ok_or_else(|| Signal::error("do-until/do-while: missing condition"))?;
+        let idx_sym = self.intern("$idx");
+        let mut scope = Scope::new(self);
+        scope.bind(idx_sym, Value::Int(0));
         let mut result;
+        let mut i: i64 = 0;
         loop {
+            self.set_global(idx_sym, Value::Int(i));
             result = self.eval_body(&args[1..])?;
+            i += 1;
             if self.eval(cond)?.is_truthy() == until {
                 break;
             }
@@ -1427,11 +1471,14 @@ impl Interp {
         };
         let break_cond = spec.get(2);
 
+        let idx_sym = self.intern("$idx");
         let mut scope = Scope::new(self);
         scope.bind(var, Value::Nil);
+        scope.bind(idx_sym, Value::Int(0));
         let mut result = Value::Nil;
-        for item in items.iter() {
+        for (i, item) in items.iter().enumerate() {
             self.set_global(var, item.clone());
+            self.set_global(idx_sym, Value::Int(i as i64));
             if let Some(cond) = break_cond {
                 if self.eval(cond)?.is_truthy() {
                     break;
@@ -1466,11 +1513,14 @@ impl Interp {
         };
         let break_cond = spec.get(2);
 
+        let idx_sym = self.intern("$idx");
         let mut scope = Scope::new(self);
         scope.bind(var, Value::Nil);
+        scope.bind(idx_sym, Value::Int(0));
         let mut result = Value::Nil;
-        for cp in crate::utf8::codepoints(&bytes) {
+        for (i, cp) in crate::utf8::codepoints(&bytes).enumerate() {
             self.set_global(var, Value::Int(i64::from(cp)));
+            self.set_global(idx_sym, Value::Int(i as i64));
             if let Some(cond) = break_cond {
                 if self.eval(cond)?.is_truthy() {
                     break;
@@ -1482,13 +1532,38 @@ impl Interp {
     }
 
     fn sf_context(&self, args: &[Value]) -> Result<Value, Signal> {
-        // (context 'X) / (context X). The reader has already switched the current
-        // context for symbol qualification (ADR-0026); at runtime we register the
-        // context value so `X` evaluates to it (for dotree etc.), and return it.
+        // (context) with no argument returns the current context (ADR-0026).
+        if args.is_empty() {
+            return Ok(Value::Context(*self.current_ctx.borrow()));
+        }
         let cid = self.context_target(args.first())?;
         if self.sym_name(cid) != "MAIN" && !matches!(self.lookup(cid), Value::Context(_)) {
             self.set_global(cid, Value::Context(cid));
         }
+        // (context ctx word [value]) creates a symbol `ctx:word` (a nil-free
+        // way to build data structures) and optionally sets its value, returning
+        // the symbol. `word` is a string or a symbol whose term is used.
+        if args.len() >= 2 {
+            let term = match self.eval(&args[1])? {
+                Value::Str(b) => String::from_utf8_lossy(&b).into_owned(),
+                Value::Symbol(id) => {
+                    let n = self.sym_name(id);
+                    n.rsplit(':').next().unwrap_or(&n).to_string()
+                }
+                other => self.repr(&other),
+            };
+            let qualified = self.intern(&format!("{}:{}", self.sym_name(cid), term));
+            if let Some(v) = args.get(2) {
+                let val = self.eval(v)?;
+                self.set_global(qualified, val);
+            }
+            return Ok(Value::Symbol(qualified));
+        }
+        // (context 'X) / (context X): switch the runtime current context. The
+        // reader has already switched it for symbol qualification; here we
+        // register the context value so `X` evaluates to it and track it for the
+        // no-arg query form.
+        *self.current_ctx.borrow_mut() = cid;
         Ok(Value::Context(cid))
     }
 
@@ -1544,9 +1619,12 @@ impl Interp {
         };
         let syms = self.interner.borrow().context_symbols(&ctx_name);
 
+        let idx_sym = self.intern("$idx");
         let mut scope = Scope::new(self);
         scope.bind(var, Value::Nil);
+        scope.bind(idx_sym, Value::Int(0));
         let mut result = Value::Nil;
+        let mut i: i64 = 0;
         for sym in syms {
             if only_toplevel {
                 let name = self.sym_name(sym);
@@ -1555,7 +1633,9 @@ impl Interp {
                 }
             }
             self.set_global(var, Value::Symbol(sym));
+            self.set_global(idx_sym, Value::Int(i));
             result = self.eval_body(&args[1..])?;
+            i += 1;
         }
         Ok(result)
     }
@@ -1732,8 +1812,80 @@ impl Interp {
             ));
         }
         let target = self.eval(&args[0])?;
+        let place = self.resolve_place(&args[1]).ok();
+        let data_val = match &place {
+            Some(p) => self.read_place(p)?,
+            None => self.eval(&args[1])?,
+        };
+        // String replacement (newLISP): the replacement expression is
+        // re-evaluated per match with $0..$N bound. A literal key matches
+        // literally; a 4th argument (a regex option) switches the key to a
+        // regular expression.
+        #[cfg(feature = "regex")]
+        if let (Value::Str(key), Value::Str(data)) = (&target, &data_val) {
+            let (pattern, option) = if args.len() >= 4 {
+                let opt = match self.eval(&args[3])? {
+                    Value::Int(n) => n,
+                    Value::Float(f) => f as i64,
+                    _ => 0,
+                };
+                (String::from_utf8_lossy(key).into_owned(), opt)
+            } else {
+                (regex::escape(&String::from_utf8_lossy(key)), 0)
+            };
+            return self.replace_regex(place, data.to_vec(), &pattern, option, &args[2]);
+        }
+        // List (or other) replacement: a single evaluation of `new`.
         let newval = self.eval(&args[2])?;
-        self.place_or_value(&args[1], |loc| do_replace(loc, &target, &newval))
+        let mut v = data_val;
+        do_replace(&mut v, &target, &newval);
+        if let Some(p) = place {
+            let r = v.clone();
+            self.with_place_mut(&p, move |loc| {
+                *loc = r;
+                Ok(Value::Nil)
+            })?;
+        }
+        Ok(v)
+    }
+
+    /// String `replace` inner loop: for each match of `pattern` over `data`,
+    /// bind $0..$N, re-evaluate `repl_expr`, and splice its (string) result in;
+    /// a nil result deletes the match. Writes the result back to `place` if the
+    /// data came from one, and returns the new string.
+    #[cfg(feature = "regex")]
+    fn replace_regex(
+        &self,
+        place: Option<Place>,
+        data: Vec<u8>,
+        pattern: &str,
+        option: i64,
+        repl_expr: &Value,
+    ) -> Result<Value, Signal> {
+        let re = self.compiled_regex(pattern, option)?;
+        let mut out: Vec<u8> = Vec::new();
+        let mut last = 0usize;
+        for caps in re.captures_iter(&data) {
+            let m0 = caps.get(0).expect("group 0 always present");
+            out.extend_from_slice(&data[last..m0.start()]);
+            self.set_regex_captures(&caps);
+            match self.eval(repl_expr)? {
+                Value::Str(b) => out.extend_from_slice(&b),
+                Value::Nil => {}
+                other => out.extend_from_slice(self.repr(&other).as_bytes()),
+            }
+            last = m0.end();
+        }
+        out.extend_from_slice(&data[last..]);
+        let result = Value::str(out);
+        if let Some(p) = place {
+            let r = result.clone();
+            self.with_place_mut(&p, move |loc| {
+                *loc = r;
+                Ok(Value::Nil)
+            })?;
+        }
+        Ok(result)
     }
 
     /// A total order over values, for `sort` (symbols compare by name).
@@ -3339,7 +3491,10 @@ mod tests {
     fn rounding_sign_bits_base64() {
         assert_eq!(as_int(run("(int (ceil 3.2))")), 4);
         assert_eq!(as_int(run("(int (floor 3.8))")), 3);
-        assert!(is_true("(= 3.14 (round 3.14159 2))"));
+        // newLISP: negative digits round decimal places (positive rounds the
+        // integer part), so 2-decimal rounding is `-2`.
+        assert!(is_true("(= 3.14 (round 3.14159 -2))"));
+        assert!(is_true("(= 100 (round 123.49 2))"));
         assert_eq!(as_int(run("(sgn -5)")), -1);
         assert_eq!(as_int(run("(sgn 0)")), 0);
         assert_eq!(as_int(run("(sgn 9)")), 1);
