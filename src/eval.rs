@@ -3253,6 +3253,26 @@ mod tests {
     }
 
     #[test]
+    fn rounding_sign_bits_base64() {
+        assert_eq!(as_int(run("(int (ceil 3.2))")), 4);
+        assert_eq!(as_int(run("(int (floor 3.8))")), 3);
+        assert!(is_true("(= 3.14 (round 3.14159 2))"));
+        assert_eq!(as_int(run("(sgn -5)")), -1);
+        assert_eq!(as_int(run("(sgn 0)")), 0);
+        assert_eq!(as_int(run("(sgn 9)")), 1);
+        assert_eq!(as_str(run("(bits 5)")), "101");
+        assert_eq!(as_str(run("(bits 21534)")), "101010000011110");
+        assert_eq!(
+            as_str(run("(base64-enc \"hello world\")")),
+            "aGVsbG8gd29ybGQ="
+        );
+        // Binary round-trips (byte 9 = tab) through encode/decode.
+        assert!(is_true(
+            "(= \"a\\009b\" (base64-dec (base64-enc \"a\\009b\")))"
+        ));
+    }
+
+    #[test]
     fn dostring_iterates_code_points() {
         // For ASCII a code point is its byte: sum of "ABC" = 65 + 66 + 67.
         assert_eq!(

@@ -45,6 +45,21 @@ pub fn install(interp: &Interp) {
     reg("log", b_log);
     reg("pow", b_pow);
     reg("mod", b_mod);
+    // Rounding, sign, extra trig/hyperbolic (ADR-0032 follow-on fill-ins).
+    reg("ceil", |_, a| flt1(a, f64::ceil));
+    reg("floor", |_, a| flt1(a, f64::floor));
+    reg("round", b_round);
+    reg("sgn", b_sgn);
+    reg("atan2", b_atan2);
+    reg("sinh", |_, a| flt1(a, f64::sinh));
+    reg("cosh", |_, a| flt1(a, f64::cosh));
+    reg("tanh", |_, a| flt1(a, f64::tanh));
+    reg("asinh", |_, a| flt1(a, f64::asinh));
+    reg("acosh", |_, a| flt1(a, f64::acosh));
+    reg("atanh", |_, a| flt1(a, f64::atanh));
+    reg("bits", b_bits);
+    reg("base64-enc", b_base64_enc);
+    reg("base64-dec", b_base64_dec);
     reg("NaN?", is_nan_p);
     reg("inf?", is_inf_p);
     reg("int", b_int);
@@ -484,6 +499,105 @@ fn b_char(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
         },
         _ => Err(Signal::error("char: expected an integer or string")),
     }
+}
+
+/// `(round num [digits])` — round to `digits` decimal places (default 0),
+/// half-away-from-zero; a negative `digits` rounds to tens/hundreds/…
+fn b_round(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    let x = to_f64(args.first().unwrap_or(&Value::Nil))?;
+    let digits = match args.get(1) {
+        Some(v) => to_i64(v)?,
+        None => 0,
+    };
+    let factor = 10f64.powi(digits as i32);
+    Ok(Value::Float((x * factor).round() / factor))
+}
+
+/// `(sgn num [neg zero pos])` — the sign as `-1`/`0`/`1`, or the matching one of
+/// the optional branch values.
+fn b_sgn(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    let x = to_f64(args.first().unwrap_or(&Value::Nil))?;
+    let (branch, default) = if x < 0.0 {
+        (1, -1)
+    } else if x > 0.0 {
+        (3, 1)
+    } else {
+        (2, 0)
+    };
+    match args.get(branch) {
+        Some(v) if args.len() > branch => Ok(v.clone()),
+        _ => Ok(Value::Int(default)),
+    }
+}
+
+fn b_atan2(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    Ok(Value::Float(
+        to_f64(args.first().unwrap_or(&Value::Nil))?
+            .atan2(to_f64(args.get(1).unwrap_or(&Value::Nil))?),
+    ))
+}
+
+/// `(bits int)` — the binary-digit string of `int` (two's-complement bit pattern
+/// for a negative number, no leading zeros).
+fn b_bits(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    let n = to_i64(args.first().unwrap_or(&Value::Nil))?;
+    Ok(Value::str(format!("{:b}", n as u64).into_bytes()))
+}
+
+const B64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+fn b_base64_enc(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    let data = match args.first() {
+        Some(Value::Str(b)) => b.to_vec(),
+        _ => return Err(Signal::error("base64-enc: expected a string")),
+    };
+    let mut out = Vec::with_capacity(data.len().div_ceil(3) * 4);
+    for chunk in data.chunks(3) {
+        let b0 = chunk[0];
+        let b1 = *chunk.get(1).unwrap_or(&0);
+        let b2 = *chunk.get(2).unwrap_or(&0);
+        out.push(B64[(b0 >> 2) as usize]);
+        out.push(B64[(((b0 & 0x03) << 4) | (b1 >> 4)) as usize]);
+        out.push(if chunk.len() > 1 {
+            B64[(((b1 & 0x0f) << 2) | (b2 >> 6)) as usize]
+        } else {
+            b'='
+        });
+        out.push(if chunk.len() > 2 {
+            B64[(b2 & 0x3f) as usize]
+        } else {
+            b'='
+        });
+    }
+    Ok(Value::str(out))
+}
+
+fn b_base64_dec(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    let s = match args.first() {
+        Some(Value::Str(b)) => b.to_vec(),
+        _ => return Err(Signal::error("base64-dec: expected a string")),
+    };
+    let mut out = Vec::with_capacity(s.len() / 4 * 3);
+    let mut buf: u32 = 0;
+    let mut bits = 0u32;
+    for &c in &s {
+        let v = match c {
+            b'A'..=b'Z' => c - b'A',
+            b'a'..=b'z' => c - b'a' + 26,
+            b'0'..=b'9' => c - b'0' + 52,
+            b'+' => 62,
+            b'/' => 63,
+            b'=' => break,
+            _ => continue, // skip newlines and other separators
+        };
+        buf = (buf << 6) | u32::from(v);
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((buf >> bits) as u8);
+        }
+    }
+    Ok(Value::str(out))
 }
 
 fn b_abs(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
