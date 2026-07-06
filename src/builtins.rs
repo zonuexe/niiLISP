@@ -65,6 +65,25 @@ pub fn install(interp: &Interp) {
     reg("select", b_select);
     reg("difference", b_difference);
     reg("intersect", b_intersect);
+    // Reflection predicates and title-case (self-contained fill-ins).
+    reg("context?", |_, a| {
+        Ok(boolean(matches!(a.first(), Some(Value::Context(_)))))
+    });
+    reg("lambda?", |_, a| {
+        Ok(boolean(matches!(a.first(), Some(Value::Lambda(_)))))
+    });
+    reg("macro?", |_, a| {
+        Ok(boolean(matches!(a.first(), Some(Value::Fexpr(_)))))
+    });
+    reg("primitive?", |_, a| {
+        Ok(boolean(matches!(a.first(), Some(Value::Builtin(_)))))
+    });
+    #[cfg(feature = "bigint")]
+    reg("bigint?", |_, a| {
+        Ok(boolean(matches!(a.first(), Some(Value::Bigint(_)))))
+    });
+    reg("protected?", b_protected);
+    reg("title-case", b_title_case);
     reg("NaN?", is_nan_p);
     reg("inf?", is_inf_p);
     reg("int", b_int);
@@ -661,6 +680,40 @@ fn b_parse(interp: &Interp, args: &[Value]) -> Result<Value, Signal> {
         }
         _ => Err(Signal::error("parse: separator must be a string")),
     }
+}
+
+/// `(protected? 'sym)` — whether a symbol is write-protected by `constant`.
+fn b_protected(i: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    match args.first() {
+        Some(Value::Symbol(id)) | Some(Value::Context(id)) => Ok(boolean(i.is_protected(*id))),
+        _ => Ok(boolean(false)),
+    }
+}
+
+/// `(title-case str [lower])` — uppercase the first character; with a truthy
+/// second argument, lowercase the rest.
+fn b_title_case(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    let s = match args.first() {
+        Some(Value::Str(b)) => b,
+        _ => return Err(Signal::error("title-case: expected a string")),
+    };
+    if s.is_empty() {
+        return Ok(Value::str(Vec::new()));
+    }
+    let end = crate::utf8::first_char_end(s);
+    let mut out = String::from_utf8_lossy(&s[..end])
+        .to_uppercase()
+        .into_bytes();
+    if matches!(args.get(1), Some(v) if v.is_truthy()) {
+        out.extend(
+            String::from_utf8_lossy(&s[end..])
+                .to_lowercase()
+                .into_bytes(),
+        );
+    } else {
+        out.extend_from_slice(&s[end..]);
+    }
+    Ok(Value::str(out))
 }
 
 /// Borrow a value as a list slice (an array counts as a list; `nil` is empty).

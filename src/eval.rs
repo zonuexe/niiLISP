@@ -666,6 +666,11 @@ impl Interp {
         self.globals.borrow().len()
     }
 
+    /// Whether a symbol is write-protected by `constant` (`protected?`).
+    pub fn is_protected(&self, sym: SymId) -> bool {
+        self.protected.borrow().contains(&sym)
+    }
+
     /// Read and evaluate a source buffer (for `load`), returning the last form's
     /// value. Uses the same reader setup as the main loop, so top-level
     /// `(context …)` switches are honoured (ADR-0026).
@@ -3250,6 +3255,20 @@ mod tests {
             "(= (begin (seed 7) (rand 1000000)) (begin (seed 7) (rand 1000000)))"
         ));
         assert!(is_true("(seed 1) (and (>= (rand 10) 0) (< (rand 10) 10))"));
+    }
+
+    #[test]
+    fn reflection_predicates_and_title_case() {
+        assert!(is_true("(context 'Foo) (context MAIN) (context? Foo)"));
+        assert!(is_true("(define (f x) x) (lambda? f)"));
+        assert!(is_true("(define-macro (m x) x) (macro? m)"));
+        assert!(is_true("(primitive? print)"));
+        assert!(is_true("(constant 'k 5) (protected? 'k)"));
+        assert_eq!(as_str(run("(title-case \"hello WORLD\")")), "Hello WORLD");
+        assert_eq!(
+            as_str(run("(title-case \"hello WORLD\" true)")),
+            "Hello world"
+        );
     }
 
     #[test]
