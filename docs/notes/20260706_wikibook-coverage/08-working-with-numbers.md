@@ -2,7 +2,7 @@
 
 Core arithmetic, comparison, formatting, and the **bigint model** all work as newLISP specifies. The real gaps are unbound numeric builtins (`series`, `factor`, `normal`, `deg->rad`, `rad->deg`, `~`) and a handful of functions (`int`, `pow`, `round`) with different argument/error semantics than the book describes.
 
-**Coverage: 26 ✅ / 5 ⚠️ / 7 ❌**
+**Coverage: 29 ✅ / 3 ⚠️ / 6 ❌**  *(updated: `int` nil-on-failure + base parsing, `<<`/`>>` 1-arg)*
 
 > Corrections (verified against the binary + newLISP 10.7.5 manual): four bigint-related verdicts were wrong.
 > - `(zero? 0)` → `true` (works; the original `nil` reading could not be reproduced).
@@ -17,8 +17,8 @@ Core arithmetic, comparison, formatting, and the **bigint model** all work as ne
 | float arithmetic promotion (`(+ 1.5 2)`) | ✅ | `3` shown as `3`... see note below |
 | `add/sub/mul/div/mod` | ✅ | Work as float-returning equivalents |
 | `PI` constant | ⚠️ | Not predefined; must define via `constant` yourself |
-| `int` (string→int, with default) | ⚠️ | Non-numeric string doesn't return `nil`/default; returns `0` |
-| `int` with explicit base (hex/octal/binary parsing) | ❌ | `0x`/`0b` prefix autodetection and explicit-base parsing broken/unsupported |
+| `int` (string→int, with default) | ✅ | Returns `nil`/`default` on failure; parses float & leading-digit strings (fixed 2026-07-06) |
+| `int` with explicit base (hex/octal/binary parsing) | ✅ | `0x`/`0b`/`0o` autodetect + explicit `base` arg (fixed 2026-07-06) |
 | `integer?` / `float?` / `number?` | ✅ | Match book semantics |
 | `zero?` | ✅ | `(zero? 0)` → `true`, `(zero? 5)` → `nil` |
 | `integer?` on `div` result | ✅ | `div` returns float, `integer?` correctly `nil` |
@@ -47,7 +47,7 @@ Core arithmetic, comparison, formatting, and the **bigint model** all work as ne
 | `factor` | ❌ | Unbound |
 | `gcd` | ✅ | Matches |
 | `<< >>` bitwise shift, 2-arg | ✅ | Matches |
-| `<< >>` bitwise shift, 1-arg (implicit shift by 1) | ⚠️ | Errors "expected 2 arguments"; book's `(<< 6)` → `12` has no 1-arg form |
+| `<< >>` bitwise shift, 1-arg (implicit shift by 1) | ✅ | `(<< 6)` → `12`; multi-arg fold `(<< 1 2 3)` → `32` (fixed 2026-07-06) |
 | `^ \| &` bitwise xor/or/and | ✅ | Matches |
 | `~` bitwise not | ❌ | Unbound |
 | 64-bit int overflow wraps (no silent bigint) | ✅ | Matches newLISP: plain `int * int` wraps at 64 bits; bigint only when an operand is bigint |
@@ -58,23 +58,13 @@ Core arithmetic, comparison, formatting, and the **bigint model** all work as ne
 
 ## Divergences & gaps
 
-### `int` doesn't validate/error on non-numeric strings
+### ~~`int` failure semantics and base parsing~~ — FIXED 2026-07-06
+`(int "x")` → `nil`, `(int "x" 0)` → `0`, and `0x`/`0b`/`0o` prefixes plus an
+explicit base argument now parse:
 ```
-$ niilisp -e '(println (int "x"))'
-0
+$ niilisp -e '(println (int "x") " " (int "x" 0) " " (int "0x1F") " " (int "08" 0 10))'
+nil 0 31 8
 ```
-Book: `(int "x")` → `nil`, `(int "x" 0)` → `0`. niiLISP returns `0` in both cases, silently swallowing the error path.
-
-### `int` doesn't parse hex/octal/binary prefixed strings
-```
-$ niilisp -e '(println (int (string "0x" "1F")))'
-0
-$ niilisp -e '(println (int "0b100100100101001001000000000000000000000000010100100"))'
-0
-$ niilisp -e '(println (int "08" 0 10))'
-8
-```
-Book expects `31`, `160881958715556`, and `8` respectively (the last one, base-10 parsing, does work). Hex/binary auto-detection and arbitrary-base parsing are unimplemented; only plain decimal (and default-value fallback) is handled, and the fallback returns `0` instead of `nil`/the supplied default when parsing genuinely fails.
 
 ### `round` with negative digit argument does not round to that decimal place
 ```
@@ -129,14 +119,12 @@ niilisp: not a function: nil
 ```
 Book: `(factor 42)` → `(2 3 7)` (prime factorization). `gcd` is implemented and correct, but `factor` is not.
 
-### `<<` / `>>` require 2 arguments; book's 1-arg shift-by-one form is unsupported
+### ~~`<<` / `>>` 1-arg shift-by-one~~ — FIXED 2026-07-06
 ```
-$ niilisp -e '(println (<< 6))'
-niilisp: <<: expected 2 arguments
-$ niilisp -e '(println (>> 6))'
-niilisp: >>: expected 2 arguments
+$ niilisp -e '(println (<< 6) " " (>> 6) " " (<< 1 2 3))'
+12 3 32
 ```
-Book: `(<< 6)` → `12` (implicit shift-by-1), `(>> 6)` → `3`. The 2-arg forms (`(<< 6 1)` → `12`, `(>> 6 1)` → `3`) work correctly.
+`(<< 6)` → `12`, `(>> 6)` → `3`, and the multi-arg fold `(<< 1 2 3)` → `32`.
 
 ### `~` (bitwise NOT) unbound
 ```

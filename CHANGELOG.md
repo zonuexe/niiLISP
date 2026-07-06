@@ -10,6 +10,10 @@ All notable changes to niiLISP are documented here. The format is based on
 
 - The **`$idx` system iterator** variable: `dolist`, `dostring`, `dotree`, `map`, and the `while`/`until`/`do-while`/`do-until` loops now maintain `$idx` as the current 0-based offset (e.g. `(map (fn (x) (list $idx x)) '(a b c))` → `((0 a) (1 b) (2 c))`), matching newLISP. It is dynamically scoped — saved on entry and restored (to its prior value, or unbound) on exit, so nested loops nest correctly. Surfaced by the *Introduction to newLISP* WikiBook coverage audit (`docs/notes/20260706_wikibook-coverage/`).
 
+### Fixed
+
+- Builtin edge semantics found by the WikiBook coverage audit: `int` now returns `nil` (or its `default` argument) instead of a silent `0` when a string can't be converted, and it parses `0x`/`0b`/`0o` prefixes and an explicit `base` argument (`(int "0x1F")` → `31`, `(int "FF" 0 16)` → `255`); `dup`'s third argument replicates into a list (`(dup "x" 3 true)` → `("x" "x" "x")`); and `<<`/`>>` accept the 1-argument shift-by-one form (`(<< 6)` → `12`) and fold multiple shift counts (`(<< 1 2 3)` → `32`).
+
 ## [0.3.1] - 2026-07-06
 
 ### Fixed

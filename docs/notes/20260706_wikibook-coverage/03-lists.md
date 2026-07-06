@@ -2,7 +2,7 @@
 
 Audit of niiLISP against the *Introduction to newLISP* WikiBook chapter ["Lists"](https://en.wikibooks.org/wiki/Introduction_to_newLISP/Lists), function by function, verified by running the real binary and diffing actual output against the book's documented output (not just absence of an error — niiLISP silently returns `nil` for unbound symbols and only errors with `not a function: nil` when that `nil` is then called).
 
-**Coverage: 31 ✅ / 2 ⚠️ / 10 ❌**
+**Coverage: 32 ✅ / 1 ⚠️ / 10 ❌**
 
 > Correction (verified against the newLISP 10.7.5 manual): `push` is **not** a divergence — the manual states *"The list changed is returned as a reference,"* so returning the whole mutated list is correct newLISP behavior. Re-classified ✅.
 
@@ -13,7 +13,7 @@ Audit of niiLISP against the *Introduction to newLISP* WikiBook chapter ["Lists"
 | `append` | ✅ | matches |
 | `push` | ✅ | mutates/inserts correctly; returns the changed list as a reference (per newLISP manual) |
 | `dup` (2-arg) | ✅ | string concatenation form matches |
-| `dup` (3-arg `true` flag) | ⚠️ | `true` flag to force list-of-strings output is ignored |
+| `dup` (3-arg `true` flag) | ✅ | `(dup "x" 6 true)` → list of strings (fixed 2026-07-06) |
 | `reverse` | ✅ | matches |
 | `sort` | ✅ | matches |
 | `unique` | ✅ | matches |
@@ -56,15 +56,13 @@ Audit of niiLISP against the *Introduction to newLISP* WikiBook chapter ["Lists"
 
 ## Divergences & gaps
 
-### ⚠️ `dup`'s third `true` argument (list-of-strings mode) is ignored
+### ~~`dup`'s third `true` argument (list-of-strings mode) is ignored~~ — FIXED 2026-07-06
 
 ```
-$ echo '(println (dup "x" 6 true))' | niilisp -
-xxxxxx
+$ niilisp -e '(println (dup "x" 6 true))'
+("x" "x" "x" "x" "x" "x")
 ```
-Expected (per book): `("x" "x" "x" "x" "x" "x")`
-
-The plain 2-arg form `(dup "x" 6)` → `"xxxxxx"` is correct; only the boolean-flag variant is unimplemented.
+The plain 2-arg form `(dup "x" 6)` → `"xxxxxx"` still concatenates.
 
 ### ❌ `transpose` — unbound
 

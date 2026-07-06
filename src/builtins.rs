@@ -470,27 +470,73 @@ fn is_inf_p(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
 }
 
 fn b_int(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
-    let default = || match args.get(1) {
-        Some(Value::Int(n)) => *n,
-        _ => 0,
+    // (int exp [default [base]]) — on failure, return `default` (the evaluated
+    // second argument) or nil, per newLISP; never a silent 0.
+    let on_fail = || args.get(1).cloned().unwrap_or(Value::Nil);
+    let base = match args.get(2) {
+        Some(Value::Int(b)) => Some(*b as u32),
+        _ => None,
     };
-    let n = match args.first() {
+    let parsed: Option<i64> = match args.first() {
         // `as i64` saturates: inf -> i64::MAX/MIN, NaN -> 0, matching newLISP.
-        Some(Value::Int(n)) => *n,
-        Some(Value::Float(f)) => *f as i64,
+        Some(Value::Int(n)) => Some(*n),
+        Some(Value::Float(f)) => Some(*f as i64),
         #[cfg(feature = "bigint")]
-        Some(Value::Bigint(b)) => bigint_to_i64(b),
-        Some(Value::Str(b)) => {
-            let s = String::from_utf8_lossy(b);
-            let t = s.trim();
-            t.parse::<i64>()
-                .ok()
-                .or_else(|| t.parse::<f64>().ok().map(|f| f as i64))
-                .unwrap_or_else(default)
-        }
-        _ => default(),
+        Some(Value::Bigint(b)) => Some(bigint_to_i64(b)),
+        Some(Value::Str(b)) => parse_int_str(&String::from_utf8_lossy(b), base),
+        _ => None,
     };
-    Ok(Value::Int(n))
+    Ok(parsed.map(Value::Int).unwrap_or_else(on_fail))
+}
+
+/// Parse a string to an integer the way newLISP's `int` does: optional sign,
+/// an explicit `base` or an auto-detected `0x`/`0b`/`0o` prefix, a leading
+/// decimal (float or integer) prefix otherwise. Returns `None` if no leading
+/// number is present.
+fn parse_int_str(s: &str, base: Option<u32>) -> Option<i64> {
+    let t = s.trim();
+    let (neg, body) = match t.strip_prefix('-') {
+        Some(r) => (true, r),
+        None => (false, t.strip_prefix('+').unwrap_or(t)),
+    };
+    fn strip<'a>(b: &'a str, p1: &str, p2: &str) -> Option<&'a str> {
+        b.strip_prefix(p1).or_else(|| b.strip_prefix(p2))
+    }
+    let (radix, digits) = match base {
+        Some(16) => (16, strip(body, "0x", "0X").unwrap_or(body)),
+        Some(2) => (2, strip(body, "0b", "0B").unwrap_or(body)),
+        Some(8) => (8, strip(body, "0o", "0O").unwrap_or(body)),
+        Some(b) => (b, body),
+        None => {
+            if let Some(d) = strip(body, "0x", "0X") {
+                (16, d)
+            } else if let Some(d) = strip(body, "0b", "0B") {
+                (2, d)
+            } else if let Some(d) = strip(body, "0o", "0O") {
+                (8, d)
+            } else {
+                (10, body)
+            }
+        }
+    };
+    let mag = if radix == 10 {
+        digits
+            .parse::<i64>()
+            .ok()
+            .or_else(|| digits.parse::<f64>().ok().map(|f| f as i64))
+            .or_else(|| {
+                // A leading numeric run, newLISP-style: "12abc" -> 12.
+                let pref: String = digits.chars().take_while(|c| c.is_ascii_digit()).collect();
+                pref.parse::<i64>().ok()
+            })?
+    } else {
+        // Take only the leading run of valid digits for this radix.
+        let end = digits
+            .find(|c: char| !c.is_digit(radix))
+            .unwrap_or(digits.len());
+        i64::from_str_radix(&digits[..end], radix).ok()?
+    };
+    Some(if neg { -mag } else { mag })
 }
 
 fn b_float(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
@@ -1429,8 +1475,11 @@ fn b_dup(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
         Some(Value::Int(n)) => (*n).max(0) as usize,
         _ => return Err(Signal::error("dup: expected (dup value count)")),
     };
+    // (dup exp n [bool]) — a non-nil third argument replicates into a *list*
+    // instead of concatenating a string (newLISP).
+    let as_list = matches!(args.get(2), Some(v) if v.is_truthy());
     match args.first() {
-        Some(Value::Str(b)) => Ok(Value::str(b.repeat(n))),
+        Some(Value::Str(b)) if !as_list => Ok(Value::str(b.repeat(n))),
         Some(v) => Ok(Value::list(vec![v.clone(); n])),
         None => Ok(Value::Nil),
     }
@@ -1601,21 +1650,35 @@ fn bit_xor(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
     }
     Ok(Value::Int(acc))
 }
+// (<< a b c ...) shifts a left by b, then by c, and so on; the 1-arg form
+// (<< a) shifts by 1 (newLISP). `>>` is the same to the right.
 fn shl(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
-    if args.len() != 2 {
-        return Err(Signal::error("<<: expected 2 arguments"));
+    let mut acc = to_i64(
+        args.first()
+            .ok_or_else(|| Signal::error("<<: expected an argument"))?,
+    )?;
+    if args.len() == 1 {
+        acc = acc.wrapping_shl(1);
+    } else {
+        for a in &args[1..] {
+            acc = acc.wrapping_shl(to_i64(a)? as u32);
+        }
     }
-    Ok(Value::Int(
-        to_i64(&args[0])?.wrapping_shl(to_i64(&args[1])? as u32),
-    ))
+    Ok(Value::Int(acc))
 }
 fn shr(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
-    if args.len() != 2 {
-        return Err(Signal::error(">>: expected 2 arguments"));
+    let mut acc = to_i64(
+        args.first()
+            .ok_or_else(|| Signal::error(">>: expected an argument"))?,
+    )?;
+    if args.len() == 1 {
+        acc = acc.wrapping_shr(1);
+    } else {
+        for a in &args[1..] {
+            acc = acc.wrapping_shr(to_i64(a)? as u32);
+        }
     }
-    Ok(Value::Int(
-        to_i64(&args[0])?.wrapping_shr(to_i64(&args[1])? as u32),
-    ))
+    Ok(Value::Int(acc))
 }
 
 fn time_of_day(_: &Interp, _: &[Value]) -> Result<Value, Signal> {

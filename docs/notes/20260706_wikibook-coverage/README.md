@@ -10,18 +10,18 @@ does each feature the book teaches actually work in niiLISP, and does it behave 
 
 ## Summary
 
-**≈203 ✅ / 27 ⚠️ / 83 ❌** across ~313 probed items (~65% work as the book describes). Counts mix granularities — most chapters count individual functions; ch. 15 counts whole example programs — and a few chapters' own tallies are approximate, so treat these as directional, not exact.
+**≈207 ✅ / 24 ⚠️ / 82 ❌** across ~313 probed items (~66% work as the book describes). Counts mix granularities — most chapters count individual functions; ch. 15 counts whole example programs — and a few chapters' own tallies are approximate, so treat these as directional, not exact.
 
 | # | Chapter | ✅ | ⚠️ | ❌ | Report |
 |---|---------|----|----|----|--------|
 | 1 | The basics | 17 | 1 | 0 | [01-the-basics.md](01-the-basics.md) |
 | 2 | Controlling the flow | 25 | 1 | 3 | [02-controlling-the-flow.md](02-controlling-the-flow.md) |
-| 3 | Lists | 31 | 2 | 10 | [03-lists.md](03-lists.md) |
+| 3 | Lists | 32 | 1 | 10 | [03-lists.md](03-lists.md) |
 | 4 | Strings | 24 | 3 | 8 | [04-strings.md](04-strings.md) |
 | 5 | Apply and map | 6 | 0 | 2 | [05-apply-and-map.md](05-apply-and-map.md) |
 | 6 | Contexts | 12 | 2 | 4 | [06-contexts.md](06-contexts.md) |
 | 7 | Macros | 4 | 1 | 2 | [07-macros.md](07-macros.md) |
-| 8 | Working with numbers | 26 | 5 | 7 | [08-working-with-numbers.md](08-working-with-numbers.md) |
+| 8 | Working with numbers | 29 | 3 | 6 | [08-working-with-numbers.md](08-working-with-numbers.md) |
 | 9 | Working with dates and times | 2 | 1 | 6 | [09-dates-and-times.md](09-dates-and-times.md) |
 | 10 | Working with files | 24 | 4 | 8 | [10-working-with-files.md](10-working-with-files.md) |
 | 11 | Multitasking | 10 | 2 | 2 | [11-multitasking.md](11-multitasking.md) |
