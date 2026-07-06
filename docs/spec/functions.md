@@ -233,7 +233,29 @@ integer; failures return `nil`.
 
 The fork-based **Cilk API** (`spawn`/`sync`/`abort`/`share`/`send`/`receive`,
 `fork`/`pipe`/`wait-pid`, `signal`) is a separate Unix-only, `mt`-gated slice
-(ADR-0032), not yet implemented.
+(ADR-0032).
+
+## Networking (Unix, `net` feature — ADR-0033)
+
+Stream sockets. A socket is a file **handle** (a raw fd), so `net-send`/
+`net-receive`/`net-close` reuse the file-I/O machinery. Sockets are blocking;
+`net-select` polls for readiness. A single string address is a Unix-domain path;
+a host + port is TCP.
+
+| Function | Meaning |
+| --- | --- |
+| `(net-connect host port)` / `(net-connect "/path")` | connect (TCP / Unix domain); a socket handle, or `nil` |
+| `(net-listen port)` / `(net-listen "/path")` | a listening socket |
+| `(net-accept lsock)` | accept one connection (blocking); a connected handle |
+| `(net-send sock str)` | send bytes; returns the count |
+| `(net-receive sock place maxlen [wait])` | receive ≤ `maxlen` bytes into `place`; returns the count (a special form, like `read-buffer`) |
+| `(net-select sock "read"/"write" ms)` | poll one socket; the socket if ready, else `nil` |
+| `(net-peek sock)` | bytes available to read |
+| `(net-peer sock)` / `(net-local sock)` | the remote / local address (best-effort string) |
+| `(net-close sock)` | close the socket |
+
+Deferred: UDP, `net-eval` / server mode, raw `net-packet` / `net-ping`,
+`net-lookup`, and `get-url` / HTTP.
 
 ## FFI (Unix, `ffi` feature)
 

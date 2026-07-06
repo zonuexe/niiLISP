@@ -57,6 +57,14 @@ long-horizon target we do **not** schedule (newLISP-GS needs process + net + a
 Java `guiserver.jar`; its `eval-string`-driven socket substrate is three unbuilt
 subsystems). Near term we build the shared foundation the GUI *also* needs.
 
+**GUI-substrate status:** the three subsystems are now **done** — file I/O
+(`load`/`env`, ADR-0029), external processes (`process`, ADR-0031), and stream
+sockets (`net-connect`/`net-listen`/`net-send`/`net-receive`/`net-select`,
+ADR-0033), plus `base64-enc`. The remaining substrate piece is **`eval-string`**
+(read+eval a string — guiserver dispatches inbound events that way); after that
+the GUI would be integration: vendor `guiserver.lsp` and `load` it (needs a JVM +
+`guiserver.jar` at runtime). Still not *scheduled*, but no longer far.
+
 Done so far: file I/O (ADR-0029, handles + filesystem + `save`/`load`/`source`),
 dictionaries (ADR-0030, `qa-dictionary` passes and is wired), **external processes**
 (ADR-0031: `process`/`exec`/`!`/`sleep`, cross-platform, always-on), and
@@ -74,9 +82,16 @@ round-trip binary strings). Candidates, roughly by value:
   still need a `SOCK_STREAM` + length-framed transport — a `SOCK_DGRAM` can't
   carry them); `qa-pipe` (uses an external `./newlisp` binary); the `process`
   stdio-fd redirection args.
-- **Networking** (`net-connect`/`net-listen`/`net-accept`/`net-send`/`net-receive`/
-  `net-select`, then UDP/HTTP/`net-eval`) — the other GUI enabler; grilled ADR.
-  Unlocks `qa-net`/`qa-udp`/`qa-local-domain`.
+- **Networking** (ADR-0033) — **stream sockets done and wired.**
+  `net-connect`/`net-listen`/`net-accept`/`net-send`/`net-receive`/`net-select`/
+  `net-peek`/`net-peer`/`net-local`/`net-close` (TCP + Unix-domain), behind a
+  default-on `net` feature, Unix-only; a socket is a FileTable handle. **`qa-local-domain`
+  passes** (the GUI's connect/listen/accept/send/receive/select substrate).
+  **Remaining:** UDP (`net-send`/`net-receive` datagram, `net-send-to`/
+  `net-receive-from`) → `qa-udp`; the multi-socket `net-select`; `net-eval` +
+  server mode (`qa-net`/`qa-net6` need a `newlisp` server binary); raw
+  `net-packet`/`net-ping` (root, `qa-packet`/`qa-lookup6`); `net-lookup` (DNS);
+  `get-url`/HTTP.
 - **qa-ref tail** — string-byte places (`(setf (s 3) "D")`), `eval`/loop
   place-returns. Touches the place model; scope first.
 - **Independent leaves** — **done:** `parse`, rounding/sign
