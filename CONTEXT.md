@@ -87,6 +87,10 @@ _Avoid_: "text", "UTF-8 string" (misleading — storage is bytes, not validated 
 An opaque integer returned by `open`, naming an open file in an interpreter-side registry (ADR-0029). It is a plain `Value::Int`, not a distinct value type — newLISP handles are integers and scripts pass and compare them as such. `0`/`1`/`2` are reserved for stdin/stdout/stderr; other numbers are registry slots reused from a freelist after `close` (so a stale handle can name a later-opened file, as in newLISP). Distinct from an **address (FFI)**, which is a real memory address of a value's buffer.
 _Avoid_: "file descriptor" (it is not the OS fd), "stream", "pointer"
 
+**Socket**:
+A network endpoint from the `net-*` API (ADR-0033): `net-connect`/`net-listen`/`net-accept` create one, `net-send`/`net-receive` transfer bytes, `net-select` waits for readiness, `net-close` closes it. Reproduced as a **File handle** — a raw fd in the interpreter registry — so `net-send`/`net-receive`/`net-close` reuse the file-I/O machinery (`net-receive` *is* `read-buffer`). A single string address is a Unix-domain path; a host + port is TCP. Behind a default-on `net` build feature, Unix-only.
+_Avoid_: "connection" (reserve for an established stream), "port" (a port is a number, not the socket)
+
 **External process**:
 An independent OS program launched by `process` (non-blocking, returns its pid) or run to completion by `exec`/`!` (ADR-0031). Uses `std::process::Command` — safe, cross-platform, always compiled in. The pid is a plain `Value::Int`, like a **File handle**. Distinct from the **Cilk API**, which forks the interpreter itself rather than exec'ing another program.
 _Avoid_: "child" (reserve for a forked Cilk process), "thread"
