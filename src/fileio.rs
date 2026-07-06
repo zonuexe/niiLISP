@@ -61,6 +61,14 @@ impl FileTable {
         }
         self.slots.get_mut(h as usize).and_then(|s| s.as_mut())
     }
+
+    /// Register an already-open raw fd (e.g. a `pipe` end) as a handle
+    /// (ADR-0032), so `read-line`/`write-line`/`close` work on it uniformly.
+    #[cfg(all(feature = "mt", unix))]
+    pub fn insert_fd(&mut self, fd: std::os::unix::io::RawFd) -> i64 {
+        use std::os::unix::io::FromRawFd;
+        self.insert(unsafe { File::from_raw_fd(fd) })
+    }
 }
 
 impl Default for FileTable {
@@ -184,15 +192,41 @@ fn b_write_buffer(interp: &Interp, args: &[Value]) -> Result<Value, Signal> {
         None => data.len(),
     };
     let slice = &data[..n];
-    let ok = match h {
-        1 => io::stdout().write_all(slice).is_ok(),
-        2 => io::stderr().write_all(slice).is_ok(),
+    Ok(if write_bytes(interp, h, slice) {
+        Value::Int(n as i64)
+    } else {
+        Value::Nil
+    })
+}
+
+/// Write raw bytes to handle `h` (1/2 = stdout/stderr, else a file handle),
+/// returning whether it succeeded.
+fn write_bytes(interp: &Interp, h: i64, data: &[u8]) -> bool {
+    match h {
+        1 => io::stdout().write_all(data).is_ok(),
+        2 => io::stderr().write_all(data).is_ok(),
         _ => match interp.files().borrow_mut().get_mut(h) {
-            Some(f) => f.write_all(slice).is_ok(),
-            None => return Ok(Value::Nil),
+            Some(f) => f.write_all(data).is_ok(),
+            None => false,
         },
+    }
+}
+
+/// `(write-line handle [str])` — write `str` (or the last `read-line`) followed
+/// by a newline; returns the byte count, or `nil` on failure.
+fn b_write_line(interp: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    let h = int_arg(args.first(), "write-line")?;
+    let mut line = match args.get(1) {
+        Some(Value::Str(b)) => b.to_vec(),
+        Some(_) => return Err(Signal::error("write-line: expected a string")),
+        None => interp.current_line(),
     };
-    Ok(if ok { Value::Int(n as i64) } else { Value::Nil })
+    line.push(b'\n');
+    Ok(if write_bytes(interp, h, &line) {
+        Value::Int(line.len() as i64)
+    } else {
+        Value::Nil
+    })
 }
 
 /// Read up to `size` bytes (or until `wait` appears) from handle `h` (0 =
@@ -559,6 +593,7 @@ pub fn install(interp: &Interp) {
     interp.register_builtin("seek", b_seek);
     interp.register_builtin("write-buffer", b_write_buffer);
     interp.register_builtin("read-line", b_read_line);
+    interp.register_builtin("write-line", b_write_line);
     interp.register_builtin("current-line", b_current_line);
     interp.register_builtin("read-file", b_read_file);
     interp.register_builtin("write-file", b_write_file);

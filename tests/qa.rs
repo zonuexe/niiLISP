@@ -258,6 +258,19 @@ fn qa_share_passes() {
     );
 }
 
+/// Raw `fork`/`pipe`/`wait-pid` (ADR-0032): two forked processes communicate
+/// over a pipe — a counter writes lines, an observer reads them. `mt`-gated.
+#[cfg(all(feature = "mt", unix))]
+#[test]
+fn qa_pipefork_passes() {
+    let stdout = run_qa("qa-pipefork");
+    assert!(
+        stdout.contains("ms per write->read pipe/fork") && !stdout.contains("error"),
+        "qa-pipefork did not finish cleanly:\n{}",
+        stdout
+    );
+}
+
 #[test]
 fn qa_foop_passes() {
     let stdout = run_qa("qa-foop");

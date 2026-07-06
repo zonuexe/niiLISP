@@ -124,6 +124,8 @@ pub fn install(interp: &Interp) {
         interp.register_builtin("sync", cilk::b_sync);
         interp.register_builtin("abort", cilk::b_abort);
         interp.register_builtin("share", cilk::b_share);
+        interp.register_builtin("pipe", cilk::b_pipe);
+        interp.register_builtin("wait-pid", cilk::b_wait_pid);
         // `spawn` is a special form (its expression runs in the child) — see
         // `try_special_form` / `cilk::sf_spawn`.
     }
@@ -327,6 +329,38 @@ mod cilk {
             unsafe { libc::_exit(0) };
         }
         Ok(Value::Int(pid as i64))
+    }
+
+    /// `(pipe)` — create an OS pipe, register both ends as file handles
+    /// (ADR-0032), and return `(read-handle write-handle)`. The handles work
+    /// with `read-line`/`write-line`/`close` and are inherited across `fork`.
+    pub fn b_pipe(interp: &Interp, _args: &[Value]) -> Result<Value, Signal> {
+        let mut fds = [0i32; 2];
+        if unsafe { libc::pipe(fds.as_mut_ptr()) } != 0 {
+            return Ok(Value::Nil);
+        }
+        let mut tbl = interp.files().borrow_mut();
+        let read_h = tbl.insert_fd(fds[0]);
+        let write_h = tbl.insert_fd(fds[1]);
+        Ok(Value::list(vec![Value::Int(read_h), Value::Int(write_h)]))
+    }
+
+    /// `(wait-pid pid)` — wait for child `pid` to terminate, returning its pid
+    /// (or `nil` on error). `(wait-pid pid true)` polls without blocking.
+    pub fn b_wait_pid(_interp: &Interp, args: &[Value]) -> Result<Value, Signal> {
+        let pid = to_i64(args.first().unwrap_or(&Value::Nil)) as libc::pid_t;
+        let flags = if matches!(args.get(1), Some(v) if v.is_truthy()) {
+            libc::WNOHANG
+        } else {
+            0
+        };
+        let mut status = 0i32;
+        let r = unsafe { libc::waitpid(pid, &mut status, flags) };
+        if r < 0 {
+            Ok(Value::Nil)
+        } else {
+            Ok(Value::Int(r as i64))
+        }
     }
 
     /// `(sync)` returns the pending pids. `(sync timeout [inlet])` waits up to

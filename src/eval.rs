@@ -51,6 +51,8 @@ pub const SPECIAL_FORMS: &[&str] = &[
     "dotree",
     "context",
     "until",
+    "do-until",
+    "do-while",
     "amb",
     "extend",
     "local",
@@ -781,13 +783,19 @@ impl Interp {
                 };
                 self.call_lambda(&lam, args)
             }
-            // A special-form name applied as a function (e.g. `(apply and list)`):
-            // dispatch it with the already-evaluated arguments as its operands.
-            // Value operands self-evaluate, so value-returning forms like
-            // `and`/`or` behave as expected (ADR-0027).
+            // A special-form name applied as a function (e.g. `(apply and list)`
+            // or `(map set '(a b) '(1 2))`): dispatch it with the already-
+            // evaluated operands wrapped in `quote`, so the form's own
+            // evaluation yields each value back rather than re-evaluating it
+            // (which would treat a symbol operand as a variable) (ADR-0027).
             Value::Symbol(id) => {
                 let name = self.sym_name(*id);
-                match self.try_special_form(&name, &args) {
+                let quote = self.intern("quote");
+                let quoted: Vec<Value> = args
+                    .iter()
+                    .map(|v| Value::list(vec![Value::Symbol(quote), v.clone()]))
+                    .collect();
+                match self.try_special_form(&name, &quoted) {
                     Some(r) => r,
                     None => Err(Signal::Error(format!("not a function: {}", name))),
                 }
@@ -907,6 +915,8 @@ impl Interp {
             "dotree" => self.sf_dotree(args),
             "context" => self.sf_context(args),
             "until" => self.sf_until(args),
+            "do-until" => self.sf_do_loop(args, true),
+            "do-while" => self.sf_do_loop(args, false),
             "amb" => self.sf_amb(args),
             "extend" => self.sf_extend(args),
             "local" => self.sf_local(args),
@@ -1100,6 +1110,24 @@ impl Interp {
         let mut result = Value::Nil;
         while !self.eval(cond)?.is_truthy() {
             result = self.eval_body(&args[1..])?;
+        }
+        Ok(result)
+    }
+
+    /// `(do-until cond body...)` / `(do-while cond body...)` — post-test loops
+    /// that run the body at least once, then repeat until `cond` is true
+    /// (`do-until`) or while `cond` is true (`do-while`). The condition is the
+    /// first form and is checked after each body pass.
+    fn sf_do_loop(&self, args: &[Value], until: bool) -> Result<Value, Signal> {
+        let cond = args
+            .first()
+            .ok_or_else(|| Signal::error("do-until/do-while: missing condition"))?;
+        let mut result;
+        loop {
+            result = self.eval_body(&args[1..])?;
+            if self.eval(cond)?.is_truthy() == until {
+                break;
+            }
         }
         Ok(result)
     }
