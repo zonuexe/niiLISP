@@ -10,12 +10,12 @@ does each feature the book teaches actually work in niiLISP, and does it behave 
 
 ## Summary
 
-**≈201 ✅ / 29 ⚠️ / 83 ❌** across ~313 probed items (~64% work as the book describes). Counts mix granularities — most chapters count individual functions; ch. 15 counts whole example programs — and a few chapters' own tallies are approximate, so treat these as directional, not exact.
+**≈203 ✅ / 27 ⚠️ / 83 ❌** across ~313 probed items (~65% work as the book describes). Counts mix granularities — most chapters count individual functions; ch. 15 counts whole example programs — and a few chapters' own tallies are approximate, so treat these as directional, not exact.
 
 | # | Chapter | ✅ | ⚠️ | ❌ | Report |
 |---|---------|----|----|----|--------|
 | 1 | The basics | 17 | 1 | 0 | [01-the-basics.md](01-the-basics.md) |
-| 2 | Controlling the flow | 23 | 3 | 3 | [02-controlling-the-flow.md](02-controlling-the-flow.md) |
+| 2 | Controlling the flow | 25 | 1 | 3 | [02-controlling-the-flow.md](02-controlling-the-flow.md) |
 | 3 | Lists | 31 | 2 | 10 | [03-lists.md](03-lists.md) |
 | 4 | Strings | 24 | 3 | 8 | [04-strings.md](04-strings.md) |
 | 5 | Apply and map | 6 | 0 | 2 | [05-apply-and-map.md](05-apply-and-map.md) |
@@ -43,7 +43,7 @@ does each feature the book teaches actually work in niiLISP, and does it behave 
 - **newLISP-GS GUI** (ch. 16) — the book's JVM `guiserver.lsp` path will never run; niiLISP ships an architecturally different opt-in **fltk** helper (ADR-0034), but every non-visual prerequisite (`load`/`env`/`process`/`net-*`/`base64`/`eval-string`) is present.
 
 **Recurring smaller gaps** that break book examples across chapters:
-- **`$idx`** (the loop-index system variable) is never populated in `dolist`/`map`/`for` — breaks many book snippets that print an index (ch. 2, 15).
+- ~~**`$idx`** loop-index variable~~ — **fixed 2026-07-06**: now populated in `dolist`/`dostring`/`dotree`/`map`/`while`/`until`/`do-while`/`do-until`.
 - **Regex mode** for `find`/`replace` and the **`$0..$9`** capture variables don't fire (ch. 4, 15).
 - Missing binding/HOF helpers: `letn`, `doargs`, `curry`, `global`, `find-all`, `exists`, `match`, `ref`/`ref-all`, `clean`, `series`, `factor` (ch. 2, 3, 5, 8, 15).
 - File I/O has holes: `copy-file`, `read-char`, `write-char`, `device`, `search`, `dump`, `pretty-print` unbound; `save` writes an empty file (ch. 10).

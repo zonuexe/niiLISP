@@ -6,6 +6,10 @@ All notable changes to niiLISP are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- The **`$idx` system iterator** variable: `dolist`, `dostring`, `dotree`, `map`, and the `while`/`until`/`do-while`/`do-until` loops now maintain `$idx` as the current 0-based offset (e.g. `(map (fn (x) (list $idx x)) '(a b c))` → `((0 a) (1 b) (2 c))`), matching newLISP. It is dynamically scoped — saved on entry and restored (to its prior value, or unbound) on exit, so nested loops nest correctly. Surfaced by the *Introduction to newLISP* WikiBook coverage audit (`docs/notes/20260706_wikibook-coverage/`).
+
 ## [0.3.1] - 2026-07-06
 
 ### Fixed

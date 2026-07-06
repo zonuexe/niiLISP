@@ -7,7 +7,7 @@
 use std::cmp::Ordering;
 use std::io::Write;
 
-use crate::eval::{Interp, Signal};
+use crate::eval::{Interp, Scope, Signal};
 use crate::printer::to_display;
 use crate::value::{Builtin, BuiltinFn, SymId, Value};
 
@@ -1379,8 +1379,14 @@ fn b_map(i: &Interp, args: &[Value]) -> Result<Value, Signal> {
         return Ok(Value::list(Vec::new()));
     }
     let n = lists.iter().map(|l| l.len()).min().unwrap_or(0);
+    // `map` maintains the system iterator `$idx` (the current list offset),
+    // restored on return — matching newLISP: (map (fn (x) (list $idx x)) ...).
+    let idx_sym = i.intern("$idx");
+    let mut scope = Scope::new(i);
+    scope.bind(idx_sym, Value::Int(0));
     let mut out = Vec::with_capacity(n);
     for k in 0..n {
+        i.set_global(idx_sym, Value::Int(k as i64));
         let call_args: Vec<Value> = lists.iter().map(|l| l[k].clone()).collect();
         out.push(i.call(f, call_args)?);
     }

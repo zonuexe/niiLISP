@@ -150,20 +150,20 @@ impl Drop for ArgsGuard<'_> {
 
 /// A dynamic-binding scope. On drop it restores every slot it changed, in
 /// reverse order — including on error unwind (ADR-0006).
-struct Scope<'a> {
+pub(crate) struct Scope<'a> {
     interp: &'a Interp,
     saved: Vec<(SymId, Option<Value>)>,
 }
 
 impl<'a> Scope<'a> {
-    fn new(interp: &'a Interp) -> Self {
+    pub(crate) fn new(interp: &'a Interp) -> Self {
         Scope {
             interp,
             saved: Vec::new(),
         }
     }
 
-    fn bind(&mut self, sym: SymId, val: Value) {
+    pub(crate) fn bind(&mut self, sym: SymId, val: Value) {
         let old = self.interp.globals.borrow_mut().insert(sym, val);
         self.saved.push((sym, old));
     }
@@ -1176,9 +1176,18 @@ impl Interp {
         let cond = args
             .first()
             .ok_or_else(|| Signal::error("while: missing condition"))?;
+        let idx_sym = self.intern("$idx");
+        let mut scope = Scope::new(self);
+        scope.bind(idx_sym, Value::Int(0));
         let mut result = Value::Nil;
-        while self.eval(cond)?.is_truthy() {
+        let mut i: i64 = 0;
+        loop {
+            self.set_global(idx_sym, Value::Int(i));
+            if !self.eval(cond)?.is_truthy() {
+                break;
+            }
             result = self.eval_body(&args[1..])?;
+            i += 1;
         }
         Ok(result)
     }
@@ -1188,9 +1197,18 @@ impl Interp {
         let cond = args
             .first()
             .ok_or_else(|| Signal::error("until: missing condition"))?;
+        let idx_sym = self.intern("$idx");
+        let mut scope = Scope::new(self);
+        scope.bind(idx_sym, Value::Int(0));
         let mut result = Value::Nil;
-        while !self.eval(cond)?.is_truthy() {
+        let mut i: i64 = 0;
+        loop {
+            self.set_global(idx_sym, Value::Int(i));
+            if self.eval(cond)?.is_truthy() {
+                break;
+            }
             result = self.eval_body(&args[1..])?;
+            i += 1;
         }
         Ok(result)
     }
@@ -1203,9 +1221,15 @@ impl Interp {
         let cond = args
             .first()
             .ok_or_else(|| Signal::error("do-until/do-while: missing condition"))?;
+        let idx_sym = self.intern("$idx");
+        let mut scope = Scope::new(self);
+        scope.bind(idx_sym, Value::Int(0));
         let mut result;
+        let mut i: i64 = 0;
         loop {
+            self.set_global(idx_sym, Value::Int(i));
             result = self.eval_body(&args[1..])?;
+            i += 1;
             if self.eval(cond)?.is_truthy() == until {
                 break;
             }
@@ -1427,11 +1451,14 @@ impl Interp {
         };
         let break_cond = spec.get(2);
 
+        let idx_sym = self.intern("$idx");
         let mut scope = Scope::new(self);
         scope.bind(var, Value::Nil);
+        scope.bind(idx_sym, Value::Int(0));
         let mut result = Value::Nil;
-        for item in items.iter() {
+        for (i, item) in items.iter().enumerate() {
             self.set_global(var, item.clone());
+            self.set_global(idx_sym, Value::Int(i as i64));
             if let Some(cond) = break_cond {
                 if self.eval(cond)?.is_truthy() {
                     break;
@@ -1466,11 +1493,14 @@ impl Interp {
         };
         let break_cond = spec.get(2);
 
+        let idx_sym = self.intern("$idx");
         let mut scope = Scope::new(self);
         scope.bind(var, Value::Nil);
+        scope.bind(idx_sym, Value::Int(0));
         let mut result = Value::Nil;
-        for cp in crate::utf8::codepoints(&bytes) {
+        for (i, cp) in crate::utf8::codepoints(&bytes).enumerate() {
             self.set_global(var, Value::Int(i64::from(cp)));
+            self.set_global(idx_sym, Value::Int(i as i64));
             if let Some(cond) = break_cond {
                 if self.eval(cond)?.is_truthy() {
                     break;
@@ -1544,9 +1574,12 @@ impl Interp {
         };
         let syms = self.interner.borrow().context_symbols(&ctx_name);
 
+        let idx_sym = self.intern("$idx");
         let mut scope = Scope::new(self);
         scope.bind(var, Value::Nil);
+        scope.bind(idx_sym, Value::Int(0));
         let mut result = Value::Nil;
+        let mut i: i64 = 0;
         for sym in syms {
             if only_toplevel {
                 let name = self.sym_name(sym);
@@ -1555,7 +1588,9 @@ impl Interp {
                 }
             }
             self.set_global(var, Value::Symbol(sym));
+            self.set_global(idx_sym, Value::Int(i));
             result = self.eval_body(&args[1..])?;
+            i += 1;
         }
         Ok(result)
     }

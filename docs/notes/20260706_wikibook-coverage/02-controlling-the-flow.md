@@ -2,7 +2,7 @@
 
 Most conditionals, loops, and binding forms work exactly as the WikiBook describes; the notable gaps are the `$idx` loop-index system variable (always `nil`), a completely missing `letn`, and a missing `doargs`.
 
-**Coverage: 23 ✅ / 3 ⚠️ / 3 ❌**
+**Coverage: 25 ✅ / 1 ⚠️ / 3 ❌**  *(updated: `$idx` implemented for dolist/dostring/dotree/map/while/until/do-while/do-until)*
 
 > Correction: `dotree` was mis-tested with a two-variable spec `(k v Ctx)`. newLISP's real syntax is `(dotree (sym sym-context [bool]) body)` — a **single** loop variable. With the correct form it works: `(dotree (s Foo) (println s))` iterates `Foo`'s symbols in sorted order. Re-classified ✅.
 
@@ -13,7 +13,7 @@ Most conditionals, loops, and binding forms work exactly as the WikiBook describ
 | `when` | ✅ | multiple body expressions all execute |
 | `cond` | ✅ | |
 | `case` | ✅ | matches literal, unevaluated values; `true` catch-all works |
-| `dolist` | ⚠️ | iteration and values correct, but `$idx` is always `nil` |
+| `dolist` | ✅ | `$idx` loop index now populated (fixed 2026-07-06) |
 | `dolist` break-test (3rd arg) | ✅ | stops before the element that satisfies the test |
 | `dostring` | ✅ | yields character codes, matching the book |
 | `dotimes` | ✅ | |
@@ -37,28 +37,33 @@ Most conditionals, loops, and binding forms work exactly as the WikiBook describ
 | `args` | ✅ | returns unconsumed trailing arguments |
 | `doargs` | ❌ | not implemented — errors as an unbound symbol called as a function |
 | `amb` | ✅ | returns a random element across repeated calls |
-| `map` with `fn` body using `$idx` | ⚠️ | element values correct, but `$idx` is always `nil` (same root cause as dolist) |
+| `map` with `fn` body using `$idx` | ✅ | `$idx` now populated (fixed 2026-07-06) |
 | dynamic scoping | ✅ | function sees caller's `x` from `for`-loop rebind, then sees restored outer value afterward |
 | `unless` | ✅ | inverse of `when`, works |
 | `dotree` | ✅ | works with the correct single-var syntax `(dotree (sym context) body)`; the earlier failure was a wrong two-var test spec |
 
 ## Divergences & gaps
 
-### `$idx` never populated (dolist, map)
+### ~~`$idx` never populated (dolist, map)~~ — FIXED 2026-07-06
+
+`$idx` is now maintained by `dolist`, `dostring`, `dotree`, `map`, and the
+`while`/`until`/`do-while`/`do-until` loops (`src/eval.rs`, `src/builtins.rs`;
+regression test `tests/loop_idx.rs`). It is dynamically scoped and restored on
+loop exit.
 
 ```
-$ niilisp -e "(dolist (i (list 10 20 30)) (println \"Element \" \$idx \": \" i))"
-Element nil: 10
-Element nil: 20
-Element nil: 30
+$ niilisp -e "(dolist (x '(a b d e f g)) (println \$idx \":\" x))"
+0:a
+1:b
+2:d
+3:e
+4:f
+5:g
+$ niilisp -e "(println (map (fn (x) (list \$idx x)) '(a b c)))"
+((0 a) (1 b) (2 c))
 ```
-```
-$ niilisp -e "(map (fn (i) (println \"Element \" \$idx \": \" i)) '(10 20 30))"
-Element nil: 10
-Element nil: 20
-Element nil: 30
-```
-Element values are correct but the per-iteration index that the book relies on (`$idx`, starting at 0) is never bound — it is a bare unbound symbol in niiLISP's implementation (confirmed absent from `src/*.rs`), so it always reads as `nil`.
+
+(`for` and `dotimes` intentionally do **not** set `$idx` — newLISP does not document it there, and their loop variable already is the index.)
 
 ### `letn` — missing entirely
 
