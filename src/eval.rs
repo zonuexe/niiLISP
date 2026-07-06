@@ -83,6 +83,12 @@ pub const SPECIAL_FORMS: &[&str] = &[
     "catch",
     "throw",
     "read-buffer",
+    // Cilk special forms (ADR-0032). Real only in the Unix `mt` build; listing
+    // them here makes a bare `spawn`/`fork` reference evaluate to a truthy symbol
+    // (as `(if (not fork) …)` in `qa-cilk` probes). Their `try_special_form`
+    // arms are `mt`-gated, so a call is a plain error in a non-`mt` build.
+    "spawn",
+    "fork",
 ];
 
 /// The interpreter state. Methods take `&self`; mutable state lives behind
@@ -118,6 +124,10 @@ pub struct Interp {
     /// The most recent `read-line` result, for `(current-line)` — a single
     /// interpreter-global buffer, as in newLISP (ADR-0029).
     current_line: RefCell<Vec<u8>>,
+    /// Cilk API state: the pending `spawn`ed children and `share`d pages
+    /// (ADR-0032). Present only in the Unix `mt` build.
+    #[cfg(all(feature = "mt", unix))]
+    cilk: RefCell<crate::process::CilkState>,
 }
 
 /// Pops the `args` stack when a call returns (including on error unwind),
@@ -247,6 +257,8 @@ impl Interp {
             regex_cache: RefCell::new(HashMap::new()),
             files: RefCell::new(crate::fileio::FileTable::new()),
             current_line: RefCell::new(Vec::new()),
+            #[cfg(all(feature = "mt", unix))]
+            cilk: RefCell::new(crate::process::CilkState::default()),
         };
         builtins::install(&interp);
         crate::ffi::install(&interp);
@@ -268,6 +280,28 @@ impl Interp {
     /// The most recent `read-line` result (`(current-line)`).
     pub fn current_line(&self) -> Vec<u8> {
         self.current_line.borrow().clone()
+    }
+
+    /// The Cilk API state (ADR-0032), for the `spawn`/`sync`/`abort`/`share`
+    /// builtins in `process.rs`.
+    #[cfg(all(feature = "mt", unix))]
+    pub fn cilk(&self) -> &RefCell<crate::process::CilkState> {
+        &self.cilk
+    }
+
+    /// Read the first form from `src` as **data** (no evaluation) — used to
+    /// deserialise a value transferred across a process boundary (ADR-0032).
+    /// Returns `nil` if it does not parse.
+    #[cfg(all(feature = "mt", unix))]
+    pub fn read_one(&self, src: &[u8]) -> Value {
+        let primitives = self.primitive_names();
+        let mut interner = self.interner.borrow_mut();
+        let mut reader = crate::reader::Reader::new(src, &mut interner, &primitives);
+        reader
+            .read_all()
+            .ok()
+            .and_then(|forms| forms.into_iter().next())
+            .unwrap_or(Value::Nil)
     }
 
     /// Record the process command line for `(main-args)`.
@@ -747,6 +781,17 @@ impl Interp {
                 };
                 self.call_lambda(&lam, args)
             }
+            // A special-form name applied as a function (e.g. `(apply and list)`):
+            // dispatch it with the already-evaluated arguments as its operands.
+            // Value operands self-evaluate, so value-returning forms like
+            // `and`/`or` behave as expected (ADR-0027).
+            Value::Symbol(id) => {
+                let name = self.sym_name(*id);
+                match self.try_special_form(&name, &args) {
+                    Some(r) => r,
+                    None => Err(Signal::Error(format!("not a function: {}", name))),
+                }
+            }
             other => Err(Signal::Error(format!(
                 "not a function: {}",
                 self.repr(other)
@@ -890,6 +935,10 @@ impl Interp {
             "catch" => self.sf_catch(args),
             "throw" => self.sf_throw(args),
             "read-buffer" => self.sf_read_buffer(args),
+            #[cfg(all(feature = "mt", unix))]
+            "spawn" => crate::process::sf_spawn(self, args),
+            #[cfg(all(feature = "mt", unix))]
+            "fork" => crate::process::sf_fork(self, args),
             _ => return None,
         };
         Some(r)
@@ -2100,13 +2149,23 @@ impl Interp {
     }
 
     fn sf_time(&self, args: &[Value]) -> Result<Value, Signal> {
-        // (time expr) -> milliseconds spent evaluating expr.
+        // (time expr [count]) -> milliseconds spent evaluating expr `count` times.
         use std::time::Instant;
         let expr = args
             .first()
             .ok_or_else(|| Signal::error("time: missing expression"))?;
+        let count = match args.get(1) {
+            Some(e) => match self.eval(e)? {
+                Value::Int(n) => n.max(1),
+                Value::Float(f) => (f as i64).max(1),
+                _ => 1,
+            },
+            None => 1,
+        };
         let start = Instant::now();
-        self.eval(expr)?;
+        for _ in 0..count {
+            self.eval(expr)?;
+        }
         Ok(Value::Int(start.elapsed().as_millis() as i64))
     }
 

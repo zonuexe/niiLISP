@@ -29,7 +29,7 @@ name = "niilisp"
 path = "src/main.rs"
 
 [features]
-default = ["ffi", "bigint", "regex"]
+default = ["ffi", "bigint", "regex", "mt"]
 # `import`/FFI (ADR-0018/0019). Off via --no-default-features for a pure,
 # safe, zero-native-dependency build.
 ffi = ["dep:libloading", "dep:libffi"]
@@ -41,6 +41,11 @@ bigint = ["dep:num-bigint", "dep:num-traits"]
 # PCRE). Off via --no-default-features drops the dependency and the
 # `regex`/`regex-comp` builtins.
 regex = ["dep:regex"]
+# Fork-based multitasking / the Cilk API (ADR-0032): spawn/sync/abort/share/
+# send/receive, fork/pipe/wait-pid, signal. Real Unix fork() of the interpreter
+# via libc; Unix-only (the code is cfg'd out on non-Unix even when the feature
+# is on, like ffi). Off via --no-default-features for a build without it.
+mt = ["dep:libc"]
 
 # Optional pure-Rust deps behind the features above (all cross-compile cleanly,
 # unlike the system-libffi FFI slice).
@@ -57,6 +62,8 @@ regex = { version = "1", optional = true }
 # dlopen/dlsym + runtime-typed C calls; libffi links the system library.
 libloading = { version = "0.8", optional = true }
 libffi = { version = "3", optional = true, features = ["system"] }
+# fork/pipe/waitpid/kill/mmap/socketpair for the Cilk API (ADR-0032, `mt`).
+libc = { version = "0.2", optional = true }
 
 [profile.release]
 opt-level = 3

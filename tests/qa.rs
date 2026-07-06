@@ -229,6 +229,20 @@ fn qa_dictionary_passes() {
     );
 }
 
+/// The Cilk API (ADR-0032): `spawn`/`sync`/`abort` fork the interpreter, run the
+/// recursive `(fibo 5)` = 8 across forked processes, and collect results via the
+/// `sync` inlet callback. Needs real Unix `fork()`, so it is `mt`-gated.
+#[cfg(all(feature = "mt", unix))]
+#[test]
+fn qa_cilk_passes() {
+    let stdout = run_qa("qa-cilk");
+    assert!(
+        stdout.contains("The Cilk API tested SUCCESSFUL"),
+        "qa-cilk did not pass:\n{}",
+        stdout
+    );
+}
+
 #[test]
 fn qa_foop_passes() {
     let stdout = run_qa("qa-foop");
