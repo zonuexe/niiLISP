@@ -20,6 +20,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+          # Cross-check the Windows target so `cfg(windows)` / `cfg(not(unix))`
+          # branches — which the Linux/macOS build never compiles — are type-
+          # checked on every PR (a `cfg(not(unix))` error shipped a broken 0.3.0).
+          targets: x86_64-pc-windows-msvc
       - name: Format
         run: cargo fmt --check
       - name: Clippy (default features)
@@ -30,6 +34,11 @@ jobs:
         run: cargo test
       - name: Build (no default features / pure build)
         run: cargo build --no-default-features
+      - name: Cross-check Windows (pure build, as it ships)
+        # `cargo check` type-checks the windows-msvc target without a linker, so
+        # the platform-specific branches compile on every PR — not first at
+        # release time. Windows ships pure (`--no-default-features`).
+        run: cargo check --target x86_64-pc-windows-msvc --no-default-features
       - name: Install cargo-about + cargo-deny
         uses: taiki-e/install-action@v2
         with:

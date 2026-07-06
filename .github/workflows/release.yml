@@ -13,7 +13,36 @@ permissions:
   contents: write # create the GitHub Release and upload binary assets
 
 jobs:
+  # Gate: every shipped target must COMPILE before the irreversible crates.io
+  # publish. A `cfg(windows)` / `cfg(not(unix))` error that the Linux/macOS CI
+  # can't see (it shipped a broken 0.3.0) aborts the release here, not after
+  # publishing. Builds on native runners, exactly as the binaries do.
+  build-check:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            no-default-features: true
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install libffi (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libffi-dev
+      - name: Compile (release, as it ships)
+        run: cargo build --release ${{ matrix.no-default-features && '--no-default-features' || '' }}
+
   publish-crate:
+    needs: build-check # publish only if every target compiled
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
