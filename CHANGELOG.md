@@ -6,6 +6,12 @@ All notable changes to niiLISP are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-07-06
+
+### Fixed
+
+- The Windows build failed to compile (`cargo install niilisp` on Windows, and the pure `--no-default-features` build): a `#[cfg(not(unix))]` branch of `file-info` bound a generic function without type annotations (`E0283`). That branch never compiles on Unix, so it slipped past the macOS/Linux CI; the 0.3.0 crate is unaffected on Unix.
+
 ## [0.3.0] - 2026-07-06
 
 ### Added
@@ -90,7 +96,8 @@ Initial release: a usable command-line interpreter for small newLISP scripts.
 `import`/FFI, networking, bigint, arrays, full UTF-8 character operations, and
 the remaining newLISP standard library.
 
-[Unreleased]: https://github.com/zonuexe/niiLISP/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/zonuexe/niiLISP/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/zonuexe/niiLISP/releases/tag/v0.3.1
 [0.3.0]: https://github.com/zonuexe/niiLISP/releases/tag/v0.3.0
 [0.2.0]: https://github.com/zonuexe/niiLISP/releases/tag/v0.2.0
 [0.1.0]: https://github.com/zonuexe/niiLISP/releases/tag/v0.1.0

@@ -1,6 +1,6 @@
 [package]
 name = "niilisp"
-version = "0.3.0"
+version = "0.3.1"
 edition = "2021"
 description = "A re-implementation of the newLISP dialect, prioritising compatibility with existing newLISP assets."
 license = "GPL-3.0-or-later"
