@@ -302,6 +302,21 @@ fn qa_siguser_passes() {
     );
 }
 
+/// Stream sockets (ADR-0033): a `fork`ed listener `net-listen`/`net-accept`s a
+/// Unix-domain socket, and the parent `net-connect`/`net-send`/`net-select`/
+/// `net-receive`s a round trip — the connect/listen/accept/send/receive/select
+/// surface the GUI needs. Needs `net` (sockets) and `mt` (fork).
+#[cfg(all(feature = "net", feature = "mt", unix))]
+#[test]
+fn qa_local_domain_passes() {
+    let stdout = run_qa("qa-local-domain");
+    assert!(
+        stdout.contains("UNIX local domain sockets SUCCESSFUL"),
+        "qa-local-domain did not pass:\n{}",
+        stdout
+    );
+}
+
 #[test]
 fn qa_foop_passes() {
     let stdout = run_qa("qa-foop");

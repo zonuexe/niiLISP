@@ -14,6 +14,7 @@ mod builtins;
 mod eval;
 mod ffi;
 mod fileio;
+mod net;
 mod printer;
 mod process;
 mod reader;

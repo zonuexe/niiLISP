@@ -92,6 +92,7 @@ pub const SPECIAL_FORMS: &[&str] = &[
     "spawn",
     "fork",
     "receive",
+    "net-receive",
 ];
 
 /// The interpreter state. Methods take `&self`; mutable state lives behind
@@ -273,6 +274,7 @@ impl Interp {
         crate::ffi::install(&interp);
         crate::fileio::install(&interp);
         crate::process::install(&interp);
+        crate::net::install(&interp);
         interp
     }
 
@@ -978,6 +980,9 @@ impl Interp {
             "fork" => crate::process::sf_fork(self, args),
             #[cfg(all(feature = "mt", unix))]
             "receive" => self.sf_receive(args),
+            // `net-receive` shares `read-buffer`'s place-taking semantics.
+            #[cfg(all(feature = "net", unix))]
+            "net-receive" => self.sf_read_buffer(args),
             _ => return None,
         };
         Some(r)

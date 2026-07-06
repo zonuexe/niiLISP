@@ -29,7 +29,7 @@ name = "niilisp"
 path = "src/main.rs"
 
 [features]
-default = ["ffi", "bigint", "regex", "mt"]
+default = ["ffi", "bigint", "regex", "mt", "net"]
 # `import`/FFI (ADR-0018/0019). Off via --no-default-features for a pure,
 # safe, zero-native-dependency build.
 ffi = ["dep:libloading", "dep:libffi"]
@@ -46,6 +46,10 @@ regex = ["dep:regex"]
 # via libc; Unix-only (the code is cfg'd out on non-Unix even when the feature
 # is on, like ffi). Off via --no-default-features for a build without it.
 mt = ["dep:libc"]
+# Networking / `net-*` stream sockets (ADR-0033): connect/listen/accept/send/
+# receive/select over TCP and Unix-domain sockets. Real sockets via libc; Unix-
+# only (cfg'd out on non-Unix even when on). Off via --no-default-features.
+net = ["dep:libc"]
 
 # Optional pure-Rust deps behind the features above (all cross-compile cleanly,
 # unlike the system-libffi FFI slice).

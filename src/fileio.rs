@@ -62,13 +62,44 @@ impl FileTable {
         self.slots.get_mut(h as usize).and_then(|s| s.as_mut())
     }
 
-    /// Register an already-open raw fd (e.g. a `pipe` end) as a handle
-    /// (ADR-0032), so `read-line`/`write-line`/`close` work on it uniformly.
-    #[cfg(all(feature = "mt", unix))]
+    /// Register an already-open raw fd (a `pipe` end, ADR-0032, or a socket,
+    /// ADR-0033) as a handle, so `read-line`/`write-line`/`close` work on it
+    /// uniformly.
+    #[cfg(all(unix, any(feature = "mt", feature = "net")))]
     pub fn insert_fd(&mut self, fd: std::os::unix::io::RawFd) -> i64 {
         use std::os::unix::io::FromRawFd;
         self.insert(unsafe { File::from_raw_fd(fd) })
     }
+
+    /// The raw fd backing a handle (for socket `libc` calls, ADR-0033).
+    #[cfg(all(unix, feature = "net"))]
+    pub fn raw_fd(&self, h: i64) -> Option<std::os::unix::io::RawFd> {
+        use std::os::unix::io::AsRawFd;
+        if h < 3 {
+            return None;
+        }
+        self.slots
+            .get(h as usize)
+            .and_then(|s| s.as_ref())
+            .map(|f| f.as_raw_fd())
+    }
+}
+
+/// Write all of `data` to handle `h`, returning the byte count (or `None`). A
+/// pub entry point for `net-send` (ADR-0033).
+#[cfg(all(unix, feature = "net"))]
+pub fn write_handle(interp: &Interp, h: i64, data: &[u8]) -> Option<i64> {
+    if write_bytes(interp, h, data) {
+        Some(data.len() as i64)
+    } else {
+        None
+    }
+}
+
+/// Close handle `h` (for `net-close`, ADR-0033); `true` if it was open.
+#[cfg(all(unix, feature = "net"))]
+pub fn close_handle(interp: &Interp, h: i64) -> bool {
+    interp.files().borrow_mut().close(h)
 }
 
 impl Default for FileTable {
@@ -255,18 +286,20 @@ pub fn read_buffer(
 fn read_buffer_from<R: Read>(r: &mut R, size: usize, wait: Option<&[u8]>) -> (Vec<u8>, usize) {
     match wait {
         None => {
+            // A single read: return whatever one read yields (up to `size`).
+            // A fill-loop would block a socket `recv` waiting for more bytes
+            // that a peer holding the connection open never sends (ADR-0033);
+            // a regular file returns the whole record in one read regardless.
             let mut buf = vec![0u8; size];
-            let mut filled = 0;
-            while filled < size {
-                match r.read(&mut buf[filled..]) {
-                    Ok(0) => break,
-                    Ok(n) => filled += n,
+            let n = loop {
+                match r.read(&mut buf) {
+                    Ok(n) => break n,
                     Err(ref e) if e.kind() == io::ErrorKind::Interrupted => continue,
-                    Err(_) => break,
+                    Err(_) => break 0,
                 }
-            }
-            buf.truncate(filled);
-            (buf, filled)
+            };
+            buf.truncate(n);
+            (buf, n)
         }
         Some(w) => {
             let mut out = Vec::new();
