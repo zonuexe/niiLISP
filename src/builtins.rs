@@ -1206,6 +1206,8 @@ fn b_regex(interp: &Interp, args: &[Value]) -> Result<Value, Signal> {
     match re.captures(&text[offset..]) {
         None => Ok(Value::Nil),
         Some(caps) => {
+            // Bind $0..$N to the whole match and each group (newLISP).
+            interp.set_regex_captures(&caps);
             // Whole match then each matched subgroup, as (str off len) triples;
             // offsets are byte positions in the original text.
             let mut out = Vec::new();
@@ -2124,7 +2126,7 @@ fn b_slice(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
 /// `(find key seq)` — index of `key` in `seq`, else `nil`. For strings, `key` is
 /// a substring and the result is a byte offset (ADR-0013); for lists, `key` is
 /// an element compared structurally.
-fn b_find(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+fn b_find(interp: &Interp, args: &[Value]) -> Result<Value, Signal> {
     let key = args
         .first()
         .ok_or_else(|| Signal::error("find: missing key"))?;
@@ -2133,6 +2135,23 @@ fn b_find(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
         .ok_or_else(|| Signal::error("find: missing sequence"))?;
     match (key, seq) {
         (Value::Str(k), Value::Str(s)) => {
+            // A third argument (an integer option) selects regex mode, binds
+            // $0..$N, and returns the byte offset of the match (newLISP).
+            #[cfg(feature = "regex")]
+            if let Some(opt) = args.get(2) {
+                let option = to_i64(opt)?;
+                let pattern = String::from_utf8_lossy(k).into_owned();
+                let re = interp.compiled_regex(&pattern, option)?;
+                return match re.captures(s) {
+                    Some(caps) => {
+                        let start = caps.get(0).map(|m| m.start()).unwrap_or(0);
+                        interp.set_regex_captures(&caps);
+                        Ok(Value::Int(start as i64))
+                    }
+                    None => Ok(Value::Nil),
+                };
+            }
+            let _ = interp;
             if k.is_empty() {
                 return Ok(Value::Int(0));
             }

@@ -1,8 +1,8 @@
 # Ch. 4 — Strings
 
-Core string construction, case conversion, slicing, and simple literal `find`/`replace` all work as documented; the chapter's regex-mode features (`0` flag on `find`/`replace`, `$0..$9` capture variables, per-match expression evaluation, `find-all`), `date`, string-index `setf`/`push`/`pop`, and string-native `select` are broken or missing.
+Core string construction, case conversion, slicing, and `find`/`replace` (literal **and** regex mode, with `$0..$9` captures and per-match expression evaluation) all work as documented. Remaining gaps: `date`, `find-all`, `encrypt`, string-index `setf`/`push`/`pop`, and string-native `select`.
 
-**Coverage: 24 ✅ / 3 ⚠️ / 8 ❌**
+**Coverage: 28 ✅ / 0 ⚠️ / 7 ❌**  *(updated: regex-mode `find`/`replace`, `$0..$9`, per-match re-eval)*
 
 | Feature | Status | Notes |
 |---|---|---|
@@ -32,14 +32,14 @@ Core string construction, case conversion, slicing, and simple literal `find`/`r
 | `push` on string place | ❌ | `push: place is not a list` |
 | `pop` on string place | ❌ | `pop: place is not a list` / `not a valid place` |
 | `find` (literal substring) | ✅ | |
-| `find` with regex flag `0` | ❌ | Silently falls back to literal match; returns `nil` for patterns like `h.l` or `l+` that should match |
+| `find` with regex flag `0` | ✅ | Engages the regex engine, returns the match offset, binds `$0..$N` (fixed 2026-07-06) |
 | `find-all` | ❌ | Unbound symbol |
 | `starts-with` / `ends-with` | ✅ | |
 | `regex` (capture groups, positions) | ✅ | returns full match/position/group tuple correctly |
 | `member` on strings | ✅ | |
-| `replace` with regex flag `0` | ❌ | Pattern never matches/substitutes; string returned unchanged |
-| `$0`..`$9` capture variables (regex/replace context) | ❌ | Never bound; referencing `$0` errors "expected a string" / reads as `nil` |
-| `replace` with dynamic expression, per-match re-evaluation | ⚠️ | Expression is evaluated once and the single result is reused for every match, instead of being re-evaluated per match |
+| `replace` with regex flag `0` | ✅ | Regex substitution, replacement re-evaluated per match (fixed 2026-07-06) |
+| `$0`..`$9` capture variables (regex/replace context) | ✅ | Bound by `regex`, `find` (regex), and `replace` (fixed 2026-07-06) |
+| `replace` with dynamic expression, per-match re-evaluation | ✅ | Re-evaluated once per match with `$0..$N` bound, in both the literal and regex forms (fixed 2026-07-06) |
 | String comparison (`<`,`>`,`=`, multi-arg, case-sensitivity) | ✅ | |
 | `explode` (char list, and chunk-size form) | ✅ | |
 | `parse` (literal delimiter and regex delimiter) | ✅ | |
@@ -81,16 +81,15 @@ niilisp: pop: place is not a list
 ```
 Both push and pop assume list-only places; the string-place overload from the book is missing.
 
-### Regex mode (`0` flag) on `find`/`replace` does not actually engage the regex engine
+### ~~Regex mode (`0` flag) on `find`/`replace`~~ — FIXED 2026-07-06
 ```
-$ echo '(println (find "h.l" "hello world" 0))' | niilisp -
-nil
-$ echo '(println (find "l+" "hello world" 0))' | niilisp -
-nil
-$ echo '(println (replace "h.l" "hello world" "X" 0))' | niilisp -
-hello world
+$ niilisp -e '(println (find "h.l" "hello world" 0))'
+0
+$ niilisp -e '(println (replace "h.l" "hello world" "X" 0))'
+Xlo world
 ```
-Non-literal patterns silently fail to match even though `(regex ...)` itself works correctly with the same patterns. Only a literal substring passed with the `0` flag succeeds (falls through to plain substring semantics), so any workflow depending on regex-mode `find`/`replace` silently no-ops instead of erroring.
+Both now engage the regex engine and bind `$0..$N`. (Note the `.lsp`-string
+escaping: a regex `\w` is written `"\\w"` in niiLISP source.)
 
 ### `find-all` is unbound
 ```
@@ -98,22 +97,23 @@ $ echo '(println (find-all "[aeiou]{2,}" "beautiful ocean maintain" $0))' | niil
 niilisp: not a function: nil
 ```
 
-### `$0`..`$9` capture variables are never populated
+### ~~`$0`..`$9` capture variables never populated~~ — FIXED 2026-07-06
 ```
-$ echo '(println (replace "o" "hello" $0))' | niilisp -
-hello
-$ echo '(regex "l" "hello") (println $0)' | niilisp -
-nil
+$ niilisp -e '(regex "(l+)" "hello")(println $0 " " $1)'
+ll ll
+$ niilisp -e '(println (replace "o" "hello" (upper-case $0)))'
+hellO
 ```
-Neither `regex` nor `replace` binds `$0`/`$1`... after a match, even though `regex`'s direct return value does include the correct captured substrings and offsets. The book's canonical idiom `(replace "o" "hello" (upper-case $0) 0)` cannot work because `$0` is always `nil`, causing a downstream type error (`upper-case/lower-case: expected a string`) whenever the expression tries to use it.
+`regex`, regex-mode `find`, and `replace` now bind `$0` (whole match) and
+`$1..$N` (groups) as ordinary globals that persist until the next regex op.
 
-### `replace` with a dynamic expression evaluates the expression once, not per match
+### ~~`replace` evaluates its expression once, not per match~~ — FIXED 2026-07-06
 ```
-$ echo '(set (quote counter) 0) (set (quote text) "xaxbxcx") (replace "x" text (begin (inc counter) (string counter))) (println text) (println counter)' | niilisp -
-1a1b1c1
-1
+$ niilisp -e '(set (quote counter) 0)(set (quote text) "xaxbxcx")(replace "x" text (begin (inc counter) (string counter)))(println text " " counter)'
+1a2b3c4 4
 ```
-Expected (per newLISP semantics) `text` to become `1a2b3c4` with `counter` ending at 4 (one increment per match). Instead the replacement expression runs exactly once and its single result ("1") is spliced into every match position, and `counter` stays at 1.
+`text` becomes `1a2b3c4` with `counter` at 4 — one evaluation per match — in
+both the literal 3-arg and the regex 4-arg forms.
 
 ### `encrypt` is unbound
 ```

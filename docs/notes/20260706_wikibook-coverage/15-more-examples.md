@@ -1,16 +1,16 @@
 # Ch. 15 — More examples
 
-The chapter's five complete example programs (println override, countdown timer, two file-tree text editors, and a MacOS/Illustrator AppleScript bridge) mostly fail on niiLISP — none is fully functional, though basic building blocks (`map`, `dolist`, context-qualified function names, `args`, plain-string `replace`) work correctly.
+The chapter's complete example programs are a mixed bag: **both file-tree text editors now run end-to-end** (after the regex-`replace` and `$idx` fixes). The remaining failures are the two `println`/`setf` override examples (need `global`) and the countdown timer (needs `date-value`/`date`/`letn`/`ostype`); the AppleScript bridge is macOS-app-specific.
 
-**Coverage: 0 ✅ / 1 ⚠️ / 4 ❌**
+**Coverage: 2 ✅ / 0 ⚠️ / 4 ❌**  *(updated: both file-tree editors now run — regex `replace` + `$idx` fixed)*
 
 | Example program | Status | Notes (blocking function if failed) |
 |---|---|---|
 | On your own terms — `setf` alias via `(global 'set!)` | ❌ | `global` is unbound (returns `nil`); `(constant (global 'set!) setf)` errors with "not a function: nil" |
 | On your own terms — custom `println` counter override | ❌ | Same root cause: `(constant (global 'println) Output)` fails because `global` is unbound |
 | Simple countdown timer (`countdown` script) | ❌ | Multiple missing builtins: `date-value`, `date`, `letn`, `ostype` all unbound; `$idx` inside `dolist` is unbound (returns `nil` instead of the index) |
-| Editing text files in folders (basic, non-recursive) | ⚠️ | Script runs with no error and reports "processing file ..." for each match, but the regex-mode `replace` (4-arg form with trailing `0` flag) never substitutes — file contents are unchanged after the run |
-| Editing text files in a hierarchy (recursive version) | ❌ | Same regex-`replace` bug, plus a secondary corruption: the `page` variable passed to `write-file` ends up holding the *replacement date string* instead of file contents, so `write-file` errors with "expected a string" |
+| Editing text files in folders (basic, non-recursive) | ✅ | Reads each file, regex-`replace`s, writes back — verified end-to-end (fixed 2026-07-06: regex `replace` now substitutes and re-evaluates per match) |
+| Editing text files in a hierarchy (recursive version) | ✅ | Recurses via `directory`/`directory?` and edits each file; the earlier `page`-variable "corruption" was a symptom of the broken `replace`, now resolved (fixed 2026-07-06) |
 | Talking to other applications (Illustrator AppleScript circle script) | ❌ (not runnable here) | Platform-specific: requires `osascript`/Adobe Illustrator on macOS; not functionally probed, but relies on the same `exec`/`format`/`set` idioms that work fine standalone — no niiLISP-specific blocker identified beyond the missing app |
 
 ## Divergences & gaps

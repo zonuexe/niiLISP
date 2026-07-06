@@ -941,6 +941,20 @@ impl Interp {
         Ok(re)
     }
 
+    /// Bind the regex system variables `$0`..`$N` to the whole match and each
+    /// capture group, matching newLISP. They are ordinary globals that persist
+    /// until the next regex operation. A non-participating group binds to nil.
+    #[cfg(feature = "regex")]
+    pub(crate) fn set_regex_captures(&self, caps: &regex::bytes::Captures) {
+        for (i, m) in caps.iter().enumerate() {
+            let sym = self.intern(&format!("${}", i));
+            let v = m
+                .map(|mm| Value::str(mm.as_bytes().to_vec()))
+                .unwrap_or(Value::Nil);
+            self.set_global(sym, v);
+        }
+    }
+
     // ---- Special forms ---------------------------------------------------
 
     fn try_special_form(&self, name: &str, args: &[Value]) -> Option<Result<Value, Signal>> {
@@ -1767,8 +1781,80 @@ impl Interp {
             ));
         }
         let target = self.eval(&args[0])?;
+        let place = self.resolve_place(&args[1]).ok();
+        let data_val = match &place {
+            Some(p) => self.read_place(p)?,
+            None => self.eval(&args[1])?,
+        };
+        // String replacement (newLISP): the replacement expression is
+        // re-evaluated per match with $0..$N bound. A literal key matches
+        // literally; a 4th argument (a regex option) switches the key to a
+        // regular expression.
+        #[cfg(feature = "regex")]
+        if let (Value::Str(key), Value::Str(data)) = (&target, &data_val) {
+            let (pattern, option) = if args.len() >= 4 {
+                let opt = match self.eval(&args[3])? {
+                    Value::Int(n) => n,
+                    Value::Float(f) => f as i64,
+                    _ => 0,
+                };
+                (String::from_utf8_lossy(key).into_owned(), opt)
+            } else {
+                (regex::escape(&String::from_utf8_lossy(key)), 0)
+            };
+            return self.replace_regex(place, data.to_vec(), &pattern, option, &args[2]);
+        }
+        // List (or other) replacement: a single evaluation of `new`.
         let newval = self.eval(&args[2])?;
-        self.place_or_value(&args[1], |loc| do_replace(loc, &target, &newval))
+        let mut v = data_val;
+        do_replace(&mut v, &target, &newval);
+        if let Some(p) = place {
+            let r = v.clone();
+            self.with_place_mut(&p, move |loc| {
+                *loc = r;
+                Ok(Value::Nil)
+            })?;
+        }
+        Ok(v)
+    }
+
+    /// String `replace` inner loop: for each match of `pattern` over `data`,
+    /// bind $0..$N, re-evaluate `repl_expr`, and splice its (string) result in;
+    /// a nil result deletes the match. Writes the result back to `place` if the
+    /// data came from one, and returns the new string.
+    #[cfg(feature = "regex")]
+    fn replace_regex(
+        &self,
+        place: Option<Place>,
+        data: Vec<u8>,
+        pattern: &str,
+        option: i64,
+        repl_expr: &Value,
+    ) -> Result<Value, Signal> {
+        let re = self.compiled_regex(pattern, option)?;
+        let mut out: Vec<u8> = Vec::new();
+        let mut last = 0usize;
+        for caps in re.captures_iter(&data) {
+            let m0 = caps.get(0).expect("group 0 always present");
+            out.extend_from_slice(&data[last..m0.start()]);
+            self.set_regex_captures(&caps);
+            match self.eval(repl_expr)? {
+                Value::Str(b) => out.extend_from_slice(&b),
+                Value::Nil => {}
+                other => out.extend_from_slice(self.repr(&other).as_bytes()),
+            }
+            last = m0.end();
+        }
+        out.extend_from_slice(&data[last..]);
+        let result = Value::str(out);
+        if let Some(p) = place {
+            let r = result.clone();
+            self.with_place_mut(&p, move |loc| {
+                *loc = r;
+                Ok(Value::Nil)
+            })?;
+        }
+        Ok(result)
     }
 
     /// A total order over values, for `sort` (symbols compare by name).
