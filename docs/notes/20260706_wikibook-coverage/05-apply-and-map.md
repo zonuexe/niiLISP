@@ -1,8 +1,8 @@
 # Ch. 5 — Apply and map
 
-niiLISP covers the basic `apply`/`map` mechanics and `fn` closures-as-values, but silently ignores most of the list when `apply` is given a count (int-reduce) argument, and has no `curry` at all.
+niiLISP covers the basic `apply`/`map` mechanics, `fn` closures-as-values, and `curry`; the one remaining gap is that `apply` silently ignores most of the list when given a count (int-reduce) argument.
 
-**Coverage: 6 ✅ / 0 ⚠️ / 2 ❌**
+**Coverage: 7 ✅ / 0 ⚠️ / 1 ❌**  *(updated 2026-07-06: `curry` implemented)*
 
 > Correction: `+` on floats is **not** a divergence. In newLISP `+` is integer arithmetic (it truncates float operands to ints) and `add` is the float version — they are *not* aliases. `(+ 2.1 3.2)` → `5` is correct newLISP behavior. Re-classified ✅.
 
@@ -15,7 +15,7 @@ niiLISP covers the basic `apply`/`map` mechanics and `fn` closures-as-values, bu
 | `fn` / anonymous functions as values | ✅ | `(apply (fn (x y) (+ x y)) (list 3 4))` → `7` |
 | `apply` with count argument (fold/reduce over whole list) | ❌ | Only makes a **single call** using the first N elements; rest of the list is silently discarded |
 | `+` on floats | ✅ | `(+ 2.1 3.2)` → `5` — correct: newLISP `+` is integer arithmetic (truncates floats); use `add` for float sums |
-| `curry` | ❌ | Unbound; `(curry f x)` errors instead of returning a partial-application function |
+| `curry` | ✅ | implemented 2026-07-06; `(curry + 10)` → `(lambda ($x) (+ 10 $x))`, does not evaluate its arguments |
 
 ## Divergences & gaps
 
@@ -40,16 +40,12 @@ Expected (per book): `turquoise`, with the fold making a call for every pair con
 ```
 Actual: single call `a=1 b=2`, result `3`. The count arg is accepted syntactically but its fold semantics are not implemented — it just truncates the list to the first `count` elements and calls once.
 
-### `curry` is not implemented
+### ~~`curry` is not implemented~~ — FIXED 2026-07-06
 
-Book section builds `curry` examples for partial application (`(curry dup { })`, `(map (curry pow 2) (sequence 1 10))`).
+`curry` is now a special form. Like newLISP's, it does not evaluate its arguments — they are spliced literally into a one-argument lambda and evaluated only on application:
 
-Repro:
 ```
-(println (curry + 10))
+$ niilisp -e "(println (curry + 10)) (println ((curry + 10) 7))"
+(lambda ($x) (+ 10 $x))
+17
 ```
-Actual output:
-```
-niilisp: not a function: nil
-```
-`curry` is unbound (returns `nil` when referenced directly), so calling the "curried" result immediately fails with `not a function: nil`. No alternate name (`partial`, `curried`) is bound either. There is no built-in partial-application idiom to substitute — users must hand-roll a closure, and even that path is unrelated to this builtin's absence.

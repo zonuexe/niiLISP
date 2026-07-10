@@ -80,6 +80,7 @@ pub const SPECIAL_FORMS: &[&str] = &[
     "let",
     "letn",
     "letex",
+    "curry",
     "lambda",
     "fn",
     "lambda-macro",
@@ -134,6 +135,10 @@ pub struct Interp {
     /// by the no-arg `(context)` (ADR-0026). Symbol qualification itself is a
     /// read-time concern; this tracks the runtime view for reflection.
     current_ctx: RefCell<SymId>,
+    /// MAIN symbols explicitly declared global by `(global …)`; consulted by
+    /// `global?` and unioned into the reader's unqualified-name set so later
+    /// reads treat them as MAIN-level (ADR-0026).
+    global_syms: RefCell<HashSet<SymId>>,
     /// Cilk API state: the pending `spawn`ed children and `share`d pages
     /// (ADR-0032). Present only in the Unix `mt` build.
     #[cfg(all(feature = "mt", unix))]
@@ -272,6 +277,7 @@ impl Interp {
             files: RefCell::new(crate::fileio::FileTable::new()),
             current_line: RefCell::new(Vec::new()),
             current_ctx: RefCell::new(0),
+            global_syms: RefCell::new(HashSet::new()),
             #[cfg(all(feature = "mt", unix))]
             cilk: RefCell::new(crate::process::CilkState::default()),
             #[cfg(all(feature = "mt", unix))]
@@ -390,7 +396,31 @@ impl Interp {
         for &sf in SPECIAL_FORMS {
             set.insert(sf.to_string());
         }
+        for &id in self.global_syms.borrow().iter() {
+            set.insert(self.sym_name(id));
+        }
         set
+    }
+
+    /// Declare a MAIN symbol global (`(global …)`), so `global?` reports it and
+    /// later reads keep it unqualified inside contexts (ADR-0026).
+    pub fn make_global(&self, sym: SymId) {
+        self.global_syms.borrow_mut().insert(sym);
+    }
+
+    /// Whether a symbol is global: a special form, a registered builtin, a
+    /// context, or explicitly declared with `(global …)`.
+    pub fn is_global_sym(&self, sym: SymId) -> bool {
+        if self.global_syms.borrow().contains(&sym) {
+            return true;
+        }
+        if SPECIAL_FORMS.contains(&self.sym_name(sym).as_str()) {
+            return true;
+        }
+        matches!(
+            self.lookup(sym),
+            Value::Builtin(_) | Value::Context(_) | Value::Foreign(_)
+        )
     }
 
     /// Register a primitive under `name`. Used by the FFI module (ADR-0019).
@@ -1010,6 +1040,7 @@ impl Interp {
             "let" => self.sf_let(args),
             "letn" => self.sf_letn(args),
             "letex" => self.sf_letex(args),
+            "curry" => self.sf_curry(args),
             "lambda" | "fn" => self.sf_lambda(args, false),
             "lambda-macro" => self.sf_lambda(args, true),
             "define-macro" => self.sf_define_macro(args),
@@ -2429,6 +2460,19 @@ impl Interp {
             result = self.eval(&expanded)?;
         }
         Ok(result)
+    }
+
+    fn sf_curry(&self, args: &[Value]) -> Result<Value, Signal> {
+        // (curry func exp) → (lambda ($x) (func exp $x)). Like a macro, curry
+        // does not evaluate its arguments; they are spliced literally into the
+        // returned one-argument lambda and evaluated only when it is applied.
+        if args.len() != 2 {
+            return Err(Signal::error("curry: expected (curry func exp)"));
+        }
+        let x = self.intern("$x");
+        let params = Value::list(vec![Value::Symbol(x)]);
+        let body = Value::list(vec![args[0].clone(), args[1].clone(), Value::Symbol(x)]);
+        self.sf_lambda(&[params, body], false)
     }
 
     fn sf_lambda(&self, args: &[Value], is_fexpr: bool) -> Result<Value, Signal> {

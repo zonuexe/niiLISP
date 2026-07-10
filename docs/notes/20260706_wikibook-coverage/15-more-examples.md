@@ -1,13 +1,13 @@
 # Ch. 15 — More examples
 
-The chapter's complete example programs are a mixed bag: **both file-tree text editors now run end-to-end** (after the regex-`replace` and `$idx` fixes). The remaining failures are the two `println`/`setf` override examples (need `global`) and the countdown timer (still needs `date-value`/`date`/`ostype` — `letn` is now implemented); the AppleScript bridge is macOS-app-specific.
+The chapter's complete example programs: **both file-tree text editors and both "On your own terms" override examples now run end-to-end** (after the regex-`replace`, `$idx`, and `global` fixes). The only remaining failure is the countdown timer (still needs `date-value`/`date`/`ostype` — `letn` is now implemented); the AppleScript bridge is macOS-app-specific.
 
-**Coverage: 2 ✅ / 0 ⚠️ / 4 ❌**  *(updated: both file-tree editors now run — regex `replace` + `$idx` fixed)*
+**Coverage: 4 ✅ / 0 ⚠️ / 2 ❌**  *(updated 2026-07-06: `global` unblocks both "On your own terms" programs)*
 
 | Example program | Status | Notes (blocking function if failed) |
 |---|---|---|
-| On your own terms — `setf` alias via `(global 'set!)` | ❌ | `global` is unbound (returns `nil`); `(constant (global 'set!) setf)` errors with "not a function: nil" |
-| On your own terms — custom `println` counter override | ❌ | Same root cause: `(constant (global 'println) Output)` fails because `global` is unbound |
+| On your own terms — `set` alias via `(global 'set!)` | ✅ | Fixed 2026-07-06: `global` implemented; `(constant (global 'set!) set)` installs the alias and `(set! 'q 5)` works |
+| On your own terms — custom `println` counter override | ✅ | Fixed 2026-07-06: `(set (global 'println) Output)` overrides the builtin and later `println` calls dispatch to the override |
 | Simple countdown timer (`countdown` script) | ❌ | Still missing builtins: `date-value`, `date`, `ostype` unbound (`letn` and `$idx` now implemented) |
 | Editing text files in folders (basic, non-recursive) | ✅ | Reads each file, regex-`replace`s, writes back — verified end-to-end (fixed 2026-07-06: regex `replace` now substitutes and re-evaluates per match) |
 | Editing text files in a hierarchy (recursive version) | ✅ | Recurses via `directory`/`directory?` and edits each file; the earlier `page`-variable "corruption" was a symptom of the broken `replace`, now resolved (fixed 2026-07-06) |
@@ -15,13 +15,15 @@ The chapter's complete example programs are a mixed bag: **both file-tree text e
 
 ## Divergences & gaps
 
-### 1. `global` is unbound
+### 1. ~~`global` is unbound~~ — FIXED 2026-07-06
+
+`global`/`global?` are implemented. `(global 'sym…)` declares MAIN symbols global and returns the last, so the "On your own terms" alias/override idiom runs:
 
 ```
-$ niilisp -e "(constant (global 'set!) setf)"
-niilisp: not a function: nil
+$ niilisp -e "(constant (global 'set!) set) (set! 'q 5) (println q)"
+5
 ```
-`global` silently resolves to `nil` (per the harness's warning: unbound symbols return `nil` rather than erroring), so `(global 'set!)` evaluates to `nil`, and `(constant nil setf)` then fails with "not a function: nil". This blocks both "On your own terms" examples, which rely on `(global 'sym)` to install replacement definitions in the `MAIN` context.
+(The book's `set!` aliases `set`, not `setf` — `setf` takes a place, not a quoted symbol.)
 
 ### 2. `date-value`, `date`, `letn`, `ostype` unbound — breaks the countdown script
 

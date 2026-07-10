@@ -10,6 +10,8 @@ All notable changes to niiLISP are documented here. The format is based on
 
 - Higher-order list-query builtins from the WikiBook "Lists" chapter: `(clean pred list)` (`filter` with a negated predicate), `(index pred list)` (the indices where `pred` holds), `(exists pred list)` (the first matching element, else `nil`), `(for-all pred list)` (`true` iff every element matches), and `(transpose matrix)` (swap rows and columns, padding ragged rows with `nil`).
 - The `letn` (sequential-binding `let`, where each initializer sees the bindings made before it) and `letex` (`let` + `expand`: substitute the local values into the body before evaluating) special forms, both accepting the flat `(letn (s1 e1 …) …)` and fully-parenthesized `(letn ((s1 e1) …) …)` syntaxes with optional initializers.
+- `curry`: `(curry func exp)` returns the one-argument partial application `(lambda ($x) (func exp $x))`. Like newLISP's, it does not evaluate its arguments — they are spliced literally into the lambda and evaluated only when it is applied.
+- `global` and `global?`: `(global sym…)` declares MAIN symbols globally accessible from other contexts and returns the last (enabling the `(constant (global 'name) …)` idiom), and `(global? sym)` reports whether a symbol is global (a builtin, a special form, a context, or declared with `global`).
 
 ### Changed
 

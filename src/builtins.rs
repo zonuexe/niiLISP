@@ -83,6 +83,8 @@ pub fn install(interp: &Interp) {
         Ok(boolean(matches!(a.first(), Some(Value::Bigint(_)))))
     });
     reg("protected?", b_protected);
+    reg("global", b_global);
+    reg("global?", b_global_p);
     reg("title-case", b_title_case);
     reg("name", b_name);
     reg("prefix", b_prefix);
@@ -820,6 +822,39 @@ fn b_symbols(interp: &Interp, args: &[Value]) -> Result<Value, Signal> {
 fn b_protected(i: &Interp, args: &[Value]) -> Result<Value, Signal> {
     match args.first() {
         Some(Value::Symbol(id)) | Some(Value::Context(id)) => Ok(boolean(i.is_protected(*id))),
+        _ => Ok(boolean(false)),
+    }
+}
+
+/// `(global sym…)` — declare one or more MAIN symbols globally accessible from
+/// other contexts, returning the last one (`(constant (global 'foo) …)`).
+fn b_global(i: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    if args.is_empty() {
+        return Err(Signal::error("global: expected one or more symbols"));
+    }
+    let mut last = Value::Nil;
+    for a in args {
+        match a {
+            Value::Symbol(id) | Value::Context(id) => {
+                i.make_global(*id);
+                last = Value::Symbol(*id);
+            }
+            other => {
+                return Err(Signal::Error(format!(
+                    "global: expected a symbol, got {}",
+                    i.repr(other)
+                )))
+            }
+        }
+    }
+    Ok(last)
+}
+
+/// `(global? sym)` — whether a symbol is global (a builtin, a special form, a
+/// context, or declared with `global`).
+fn b_global_p(i: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    match args.first() {
+        Some(Value::Symbol(id)) | Some(Value::Context(id)) => Ok(boolean(i.is_global_sym(*id))),
         _ => Ok(boolean(false)),
     }
 }
