@@ -12,6 +12,8 @@ All notable changes to niiLISP are documented here. The format is based on
 - The `letn` (sequential-binding `let`, where each initializer sees the bindings made before it) and `letex` (`let` + `expand`: substitute the local values into the body before evaluating) special forms, both accepting the flat `(letn (s1 e1 …) …)` and fully-parenthesized `(letn ((s1 e1) …) …)` syntaxes with optional initializers.
 - `curry`: `(curry func exp)` returns the one-argument partial application `(lambda ($x) (func exp $x))`. Like newLISP's, it does not evaluate its arguments — they are spliced literally into the lambda and evaluated only when it is applied.
 - `global` and `global?`: `(global sym…)` declares MAIN symbols globally accessible from other contexts and returns the last (enabling the `(constant (global 'name) …)` idiom), and `(global? sym)` reports whether a symbol is global (a builtin, a special form, a context, or declared with `global`).
+- `series`: `(series start factor count)` builds a geometric sequence (each term × `factor`), and `(series start func count)` builds a sequence where each term is `(func previous)`; `count < 1` yields the empty list.
+- `factor`: `(factor int)` returns the prime factors of an integer, ascending with multiplicity (`(factor 12)` → `(2 2 3)`), over the full 64-bit range; floats are truncated first.
 
 ### Changed
 

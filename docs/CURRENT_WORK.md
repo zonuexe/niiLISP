@@ -68,8 +68,7 @@ found ~221 of 378 primitives missing, clustered into whole unbuilt subsystems
 living, example-driven backlog: the near-term divergences (⚠️) are now fixed, so
 what remains is **whole unimplemented subsystems (❌)** — best filled one planned
 slice at a time. Highest-value remaining ❌, roughly: **dates/times**
-(`date`/`now`/`date-value`/`date-parse`/`timer` — need timezone handling), small
-numeric leaves (`series`/`factor`) and the
+(`date`/`now`/`date-value`/`date-parse`/`timer` — need timezone handling), the
 pattern/reference family (`find-all`/`ref`/`ref-all`/`match`/`pop-assoc` — needs
 newLISP's match + reference/place model), **XML/JSON** (`xml-parse`/`json-parse`), the
 **debugger** (`trace`/`debug`/`error-event`), and **HTTP/UDP**
@@ -129,6 +128,7 @@ round-trip binary strings). Candidates, roughly by value:
   (+ `let` parenthesized/bare-symbol syntax, 2026-07-06), `curry`,
   `global`/`global?` (2026-07-06; global-symbol reader integration is limited by
   the batch-read model — see the contexts known-limitation note below),
+  `series`/`factor` (2026-07-06),
   reflection predicates (`context?`/`lambda?`/`macro?`/`primitive?`/`bigint?`/
   `protected?`), `title-case`. **Remaining:** XML/JSON (`xml-parse`/`json-parse`),
   dates (`date`/`now`/`date-value` — need timezone handling), symbol reflection
