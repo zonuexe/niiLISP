@@ -78,6 +78,9 @@ pub const SPECIAL_FORMS: &[&str] = &[
     "self",
     "time",
     "let",
+    "letn",
+    "letex",
+    "curry",
     "lambda",
     "fn",
     "lambda-macro",
@@ -132,6 +135,10 @@ pub struct Interp {
     /// by the no-arg `(context)` (ADR-0026). Symbol qualification itself is a
     /// read-time concern; this tracks the runtime view for reflection.
     current_ctx: RefCell<SymId>,
+    /// MAIN symbols explicitly declared global by `(global …)`; consulted by
+    /// `global?` and unioned into the reader's unqualified-name set so later
+    /// reads treat them as MAIN-level (ADR-0026).
+    global_syms: RefCell<HashSet<SymId>>,
     /// Cilk API state: the pending `spawn`ed children and `share`d pages
     /// (ADR-0032). Present only in the Unix `mt` build.
     #[cfg(all(feature = "mt", unix))]
@@ -270,6 +277,7 @@ impl Interp {
             files: RefCell::new(crate::fileio::FileTable::new()),
             current_line: RefCell::new(Vec::new()),
             current_ctx: RefCell::new(0),
+            global_syms: RefCell::new(HashSet::new()),
             #[cfg(all(feature = "mt", unix))]
             cilk: RefCell::new(crate::process::CilkState::default()),
             #[cfg(all(feature = "mt", unix))]
@@ -388,7 +396,31 @@ impl Interp {
         for &sf in SPECIAL_FORMS {
             set.insert(sf.to_string());
         }
+        for &id in self.global_syms.borrow().iter() {
+            set.insert(self.sym_name(id));
+        }
         set
+    }
+
+    /// Declare a MAIN symbol global (`(global …)`), so `global?` reports it and
+    /// later reads keep it unqualified inside contexts (ADR-0026).
+    pub fn make_global(&self, sym: SymId) {
+        self.global_syms.borrow_mut().insert(sym);
+    }
+
+    /// Whether a symbol is global: a special form, a registered builtin, a
+    /// context, or explicitly declared with `(global …)`.
+    pub fn is_global_sym(&self, sym: SymId) -> bool {
+        if self.global_syms.borrow().contains(&sym) {
+            return true;
+        }
+        if SPECIAL_FORMS.contains(&self.sym_name(sym).as_str()) {
+            return true;
+        }
+        matches!(
+            self.lookup(sym),
+            Value::Builtin(_) | Value::Context(_) | Value::Foreign(_)
+        )
     }
 
     /// Register a primitive under `name`. Used by the FFI module (ADR-0019).
@@ -1006,6 +1038,9 @@ impl Interp {
             "self" => self.sf_self(args),
             "time" => self.sf_time(args),
             "let" => self.sf_let(args),
+            "letn" => self.sf_letn(args),
+            "letex" => self.sf_letex(args),
+            "curry" => self.sf_curry(args),
             "lambda" | "fn" => self.sf_lambda(args, false),
             "lambda-macro" => self.sf_lambda(args, true),
             "define-macro" => self.sf_define_macro(args),
@@ -2304,39 +2339,140 @@ impl Interp {
         }
     }
 
+    /// Parse a `let`/`letn`/`letex` binding spec into `(symbol, optional
+    /// init-expr)` pairs, supporting newLISP's two syntaxes: the flat form
+    /// `(s1 e1 s2 e2 …)` (a lone trailing symbol defaults to `nil`), and the
+    /// fully-parenthesized form `((s1 e1) (s2) …)` where each initializer is
+    /// optional (`nil` if missing) and a bare symbol is allowed.
+    fn let_bindings<'a>(
+        &self,
+        spec: &'a [Value],
+        who: &str,
+    ) -> Result<Vec<(SymId, Option<&'a Value>)>, Signal> {
+        let as_sym = |v: Option<&Value>| -> Result<SymId, Signal> {
+            match v {
+                Some(Value::Symbol(id)) => Ok(*id),
+                other => Err(Signal::Error(format!(
+                    "{}: binding name is not a symbol: {}",
+                    who,
+                    other.map(|v| self.repr(v)).unwrap_or_else(|| "()".into())
+                ))),
+            }
+        };
+        // Parenthesized form when the first element is itself a list.
+        if matches!(spec.first(), Some(Value::List(_))) {
+            let mut out = Vec::with_capacity(spec.len());
+            for b in spec {
+                match b {
+                    Value::List(pair) => out.push((as_sym(pair.first())?, pair.get(1))),
+                    Value::Symbol(id) => out.push((*id, None)),
+                    other => {
+                        return Err(Signal::Error(format!(
+                            "{}: bad binding {}",
+                            who,
+                            self.repr(other)
+                        )))
+                    }
+                }
+            }
+            Ok(out)
+        } else {
+            // Flat form: positional symbol/init pairs.
+            let mut out = Vec::with_capacity(spec.len().div_ceil(2));
+            let mut i = 0;
+            while i < spec.len() {
+                out.push((as_sym(spec.get(i))?, spec.get(i + 1)));
+                i += 2;
+            }
+            Ok(out)
+        }
+    }
+
     fn sf_let(&self, args: &[Value]) -> Result<Value, Signal> {
-        // (let (s1 e1 s2 e2 ...) body...) — flat binding list (see qa-foop).
-        let bindings = match args.first() {
+        // (let ((s1 e1) …) body…) / (let (s1 e1 …) body…). newLISP `let` is
+        // parallel: all inits evaluate in the outer scope before any bind.
+        let spec = match args.first() {
             Some(Value::List(b)) => b,
             _ => return Err(Signal::error("let: expected a binding list")),
         };
-        if bindings.len() % 2 != 0 {
-            return Err(Signal::error("let: binding list must have an even length"));
-        }
-
-        // newLISP `let` is parallel: evaluate all inits in the outer scope first.
-        let mut pending: Vec<(SymId, Value)> = Vec::with_capacity(bindings.len() / 2);
-        let mut i = 0;
-        while i < bindings.len() {
-            let sym = match &bindings[i] {
-                Value::Symbol(id) => *id,
-                other => {
-                    return Err(Signal::Error(format!(
-                        "let: binding name is not a symbol: {}",
-                        self.repr(other)
-                    )))
-                }
+        let bindings = self.let_bindings(spec, "let")?;
+        let mut pending: Vec<(SymId, Value)> = Vec::with_capacity(bindings.len());
+        for (sym, init) in bindings {
+            let val = match init {
+                Some(e) => self.eval(e)?,
+                None => Value::Nil,
             };
-            let val = self.eval(&bindings[i + 1])?;
             pending.push((sym, val));
-            i += 2;
         }
-
         let mut scope = Scope::new(self);
         for (sym, val) in pending {
             scope.bind(sym, val);
         }
         self.eval_body(&args[1..])
+    }
+
+    fn sf_letn(&self, args: &[Value]) -> Result<Value, Signal> {
+        // (letn ((s1 e1) …) body…) — like nested `let`s: each initializer sees
+        // the bindings made so far, so `e2` can refer to `s1`.
+        let spec = match args.first() {
+            Some(Value::List(b)) => b,
+            _ => return Err(Signal::error("letn: expected a binding list")),
+        };
+        let bindings = self.let_bindings(spec, "letn")?;
+        let mut scope = Scope::new(self);
+        for (sym, init) in bindings {
+            let val = match init {
+                Some(e) => self.eval(e)?,
+                None => Value::Nil,
+            };
+            scope.bind(sym, val);
+        }
+        self.eval_body(&args[1..])
+    }
+
+    fn sf_letex(&self, args: &[Value]) -> Result<Value, Signal> {
+        // (letex ((s1 e1) …) body…) — combine `let` and `expand`: evaluate the
+        // initializers (in the outer scope, like `let`), substitute each symbol's
+        // value into the body forms, then evaluate the expanded body.
+        let spec = match args.first() {
+            Some(Value::List(b)) => b,
+            _ => return Err(Signal::error("letex: expected a binding list")),
+        };
+        let bindings = self.let_bindings(spec, "letex")?;
+        let mut pending: Vec<(SymId, Value)> = Vec::with_capacity(bindings.len());
+        for (sym, init) in bindings {
+            let val = match init {
+                Some(e) => self.eval(e)?,
+                None => Value::Nil,
+            };
+            pending.push((sym, val));
+        }
+        let syms: Vec<SymId> = pending.iter().map(|(s, _)| *s).collect();
+        let mut scope = Scope::new(self);
+        for (sym, val) in pending {
+            scope.bind(sym, val);
+        }
+        // Expand the bound symbols into each body form, then evaluate — the
+        // substitution reads the just-bound values via `lookup` (ADR-0027).
+        let mut result = Value::Nil;
+        for form in &args[1..] {
+            let expanded = crate::builtins::expand_symbols(self, form, &syms);
+            result = self.eval(&expanded)?;
+        }
+        Ok(result)
+    }
+
+    fn sf_curry(&self, args: &[Value]) -> Result<Value, Signal> {
+        // (curry func exp) → (lambda ($x) (func exp $x)). Like a macro, curry
+        // does not evaluate its arguments; they are spliced literally into the
+        // returned one-argument lambda and evaluated only when it is applied.
+        if args.len() != 2 {
+            return Err(Signal::error("curry: expected (curry func exp)"));
+        }
+        let x = self.intern("$x");
+        let params = Value::list(vec![Value::Symbol(x)]);
+        let body = Value::list(vec![args[0].clone(), args[1].clone(), Value::Symbol(x)]);
+        self.sf_lambda(&[params, body], false)
     }
 
     fn sf_lambda(&self, args: &[Value], is_fexpr: bool) -> Result<Value, Signal> {
