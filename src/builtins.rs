@@ -122,6 +122,8 @@ pub fn install(interp: &Interp) {
     reg("expand", b_expand);
     reg("append", b_append);
     reg("sequence", b_sequence);
+    reg("series", b_series);
+    reg("factor", b_factor);
     reg("map", b_map);
     reg("apply", b_apply);
     reg("filter", b_filter);
@@ -1460,6 +1462,76 @@ fn b_sequence(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
             Value::Float(v)
         });
         v += signed;
+    }
+    Ok(Value::list(out))
+}
+
+/// `(series start factor count)` — a geometric sequence (each term × `factor`),
+/// or `(series start func count)` — each term is `(func previous)`. `count < 1`
+/// yields the empty list. The geometric form's terms are floats (whole-valued
+/// floats print like integers), matching newLISP; the functional form also
+/// maintains `$idx`.
+fn b_series(i: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    if args.len() != 3 {
+        return Err(Signal::error(
+            "series: expected (series start factor|func count)",
+        ));
+    }
+    let count = to_i64(&args[2])?;
+    if count < 1 {
+        return Ok(Value::list(Vec::new()));
+    }
+    let count = count as usize;
+    // A numeric second argument selects the geometric form; anything else is a
+    // function applied to each successive term.
+    if let Some(factor) = as_f64_opt(&args[1]) {
+        let mut out = Vec::with_capacity(count);
+        let mut v = to_f64(&args[0])?;
+        for _ in 0..count {
+            out.push(Value::Float(v));
+            v *= factor;
+        }
+        Ok(Value::list(out))
+    } else {
+        let idx_sym = i.intern("$idx");
+        let mut scope = Scope::new(i);
+        scope.bind(idx_sym, Value::Int(0));
+        let mut out = Vec::with_capacity(count);
+        let mut cur = args[0].clone();
+        for k in 0..count {
+            i.set_global(idx_sym, Value::Int(k as i64));
+            out.push(cur.clone());
+            if k + 1 < count {
+                cur = i.call(&args[1], vec![cur.clone()])?;
+            }
+        }
+        Ok(Value::list(out))
+    }
+}
+
+/// `(factor int)` — the prime factors of `int`, ascending with multiplicity
+/// (`(factor 12)` → `(2 2 3)`). Floats are truncated first; `int < 2` returns
+/// `nil`.
+fn b_factor(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    let mut n = to_i64(
+        args.first()
+            .ok_or_else(|| Signal::error("factor: expected a number"))?,
+    )?;
+    if n < 2 {
+        return Ok(Value::Nil);
+    }
+    let mut out = Vec::new();
+    let mut d: i64 = 2;
+    // `d <= n / d` avoids the overflow of `d * d <= n` near i64::MAX.
+    while d <= n / d {
+        while n % d == 0 {
+            out.push(Value::Int(d));
+            n /= d;
+        }
+        d += if d == 2 { 1 } else { 2 };
+    }
+    if n > 1 {
+        out.push(Value::Int(n));
     }
     Ok(Value::list(out))
 }

@@ -2,7 +2,7 @@
 
 Core arithmetic, comparison, formatting, and the **bigint model** all work as newLISP specifies. The real gaps are unbound numeric builtins (`series`, `factor`, `normal`, `deg->rad`, `rad->deg`, `~`) and a handful of functions (`int`, `pow`, `round`) with different argument/error semantics than the book describes.
 
-**Coverage: 31 ✅ / 1 ⚠️ / 6 ❌**  *(updated: `int` nil-on-failure + base parsing, `<<`/`>>` 1-arg, `round` sign convention; `PI` matches newLISP)*
+**Coverage: 33 ✅ / 1 ⚠️ / 4 ❌**  *(updated: `int` nil-on-failure + base parsing, `<<`/`>>` 1-arg, `round` sign convention, `PI`; `series`/`factor` implemented 2026-07-06)*
 
 > Corrections (verified against the binary + newLISP 10.7.5 manual): four bigint-related verdicts were wrong.
 > - `(zero? 0)` → `true` (works; the original `nil` reading could not be reproduced).
@@ -40,11 +40,11 @@ Core arithmetic, comparison, formatting, and the **bigint model** all work as ne
 | `seed` | ⚠️ | Accepts int seed fine; `(seed (date-value))` fails — `date-value` unbound |
 | `randomize` | ✅ | Shuffles list correctly |
 | `sequence` | ✅ | Matches book output exactly |
-| `series` | ❌ | Unbound |
+| `series` | ✅ | implemented 2026-07-06; geometric `(series 2 2 5)` → `(2 4 8 16 32)` and functional `(series start func count)` forms |
 | `min` / `max` (varargs, mixed int/float) | ✅ | Matches, including float contagion |
 | `format "%x"` (hex) | ✅ | Matches |
 | `format "%1.16f"` (float precision) | ✅ | Matches once `PI`/inputs are floats |
-| `factor` | ❌ | Unbound |
+| `factor` | ✅ | implemented 2026-07-06; `(factor 12)` → `(2 2 3)`, handles the full i64 range |
 | `gcd` | ✅ | Matches |
 | `<< >>` bitwise shift, 2-arg | ✅ | Matches |
 | `<< >>` bitwise shift, 1-arg (implicit shift by 1) | ✅ | `(<< 6)` → `12`; multi-arg fold `(<< 1 2 3)` → `32` (fixed 2026-07-06) |
@@ -104,21 +104,21 @@ niilisp: not a function: nil
 ```
 `seed` itself works with a plain integer (`(seed 123)` succeeds), but `date-value` — commonly used to seed from wall-clock time — is unbound.
 
-### `series` unbound
+### ~~`series` unbound~~ — FIXED 2026-07-06
+Both forms are implemented — geometric (numeric factor) and functional (a function applied to each successive term):
 ```
 $ niilisp -e '(println (series 1 2 20))'
-niilisp: not a function: nil
-$ niilisp -e '(println (series 10 sqrt 20))'
-niilisp: not a function: nil
+(1 2 4 8 16 32 64 128 256 512 1024 2048 4096 8192 16384 32768 65536 131072 262144 524288)
+$ niilisp -e '(println (series 100 (fn (x) (/ x 2)) 4))'
+(100 50 25 12)
 ```
-Book: `(series 1 2 20)` → `(1 2 4 8 16 32 ... 524288)`; `(series 10 sqrt 20)` iteratively applies `sqrt`. Neither numeric nor functional form of `series` exists; only `sequence` is implemented.
 
-### `factor` unbound
+### ~~`factor` unbound~~ — FIXED 2026-07-06
 ```
 $ niilisp -e '(println (factor 42))'
-niilisp: not a function: nil
+(2 3 7)
 ```
-Book: `(factor 42)` → `(2 3 7)` (prime factorization). `gcd` is implemented and correct, but `factor` is not.
+Prime factorization by trial division over the full i64 range (`(= (apply * (factor n)) n)` holds).
 
 ### ~~`<<` / `>>` 1-arg shift-by-one~~ — FIXED 2026-07-06
 ```
