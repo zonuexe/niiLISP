@@ -2,9 +2,11 @@
 
 Audit of niiLISP against the *Introduction to newLISP* WikiBook chapter ["Lists"](https://en.wikibooks.org/wiki/Introduction_to_newLISP/Lists), function by function, verified by running the real binary and diffing actual output against the book's documented output (not just absence of an error — niiLISP silently returns `nil` for unbound symbols and only errors with `not a function: nil` when that `nil` is then called).
 
-**Coverage: 32 ✅ / 1 ⚠️ / 10 ❌**
+**Coverage: 37 ✅ / 1 ⚠️ / 5 ❌**
 
 > Correction (verified against the newLISP 10.7.5 manual): `push` is **not** a divergence — the manual states *"The list changed is returned as a reference,"* so returning the whole mutated list is correct newLISP behavior. Re-classified ✅.
+>
+> Update (2026-07-06): `clean`, `index`, `exists`, `for-all`, and `transpose` are now implemented. The remaining ❌ (`ref`, `ref-all`, `match`, `find-all`, `pop-assoc`) need newLISP's pattern-match + reference/place model and are deferred to a later slice.
 
 | Feature | Status | Notes |
 |---|---|---|
@@ -18,17 +20,17 @@ Audit of niiLISP against the *Introduction to newLISP* WikiBook chapter ["Lists"
 | `sort` | ✅ | matches |
 | `unique` | ✅ | matches |
 | `flat` | ✅ | matches |
-| `transpose` | ❌ | not implemented (unbound) |
+| `transpose` | ✅ | implemented (2026-07-06); ragged rows padded with `nil` per newLISP |
 | `explode` (with chunk size) | ✅ | matches |
 | `find` | ✅ | matches |
 | `member` | ✅ | matches |
 | `ref` | ❌ | not implemented (unbound) |
 | `ref-all` | ❌ | not implemented (unbound) |
 | `filter` | ✅ | matches |
-| `clean` | ❌ | not implemented (unbound) |
-| `index` | ❌ | not implemented (unbound) |
-| `exists` | ❌ | not implemented (unbound) |
-| `for-all` | ❌ | not implemented (unbound) |
+| `clean` | ✅ | implemented (2026-07-06); `filter` with a negated predicate |
+| `index` | ✅ | implemented (2026-07-06); indices where the predicate holds |
+| `exists` | ✅ | implemented (2026-07-06); first matching element, else `nil` |
+| `for-all` | ✅ | implemented (2026-07-06) |
 | `match` | ❌ | not implemented (unbound) |
 | `count` | ✅ | matches (verified against correct book sentence) |
 | `nth` | ✅ | matches |

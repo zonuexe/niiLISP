@@ -123,6 +123,11 @@ pub fn install(interp: &Interp) {
     reg("map", b_map);
     reg("apply", b_apply);
     reg("filter", b_filter);
+    reg("clean", b_clean);
+    reg("index", b_index);
+    reg("exists", b_exists);
+    reg("for-all", b_for_all);
+    reg("transpose", b_transpose);
     reg("dup", b_dup);
     // Predicates.
     reg("nil?", is_nil);
@@ -1480,6 +1485,113 @@ fn b_filter(i: &Interp, args: &[Value]) -> Result<Value, Signal> {
         if i.call(pred, vec![item.clone()])?.is_truthy() {
             out.push(item.clone());
         }
+    }
+    Ok(Value::list(out))
+}
+
+/// `(clean pred list)` — filter with a negated predicate: keep the elements for
+/// which `pred` is *false*.
+fn b_clean(i: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    if args.len() != 2 {
+        return Err(Signal::error("clean: expected (clean predicate list)"));
+    }
+    let list = match &args[1] {
+        Value::List(l) => l,
+        _ => return Err(Signal::error("clean: expected a list")),
+    };
+    let mut out = Vec::new();
+    for item in list.iter() {
+        if !i.call(&args[0], vec![item.clone()])?.is_truthy() {
+            out.push(item.clone());
+        }
+    }
+    Ok(Value::list(out))
+}
+
+/// `(index pred list)` — the indices of the elements for which `pred` is true.
+fn b_index(i: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    if args.len() != 2 {
+        return Err(Signal::error("index: expected (index predicate list)"));
+    }
+    let list = match &args[1] {
+        Value::List(l) => l,
+        _ => return Err(Signal::error("index: expected a list")),
+    };
+    let mut out = Vec::new();
+    for (k, item) in list.iter().enumerate() {
+        if i.call(&args[0], vec![item.clone()])?.is_truthy() {
+            out.push(Value::Int(k as i64));
+        }
+    }
+    Ok(Value::list(out))
+}
+
+/// `(exists pred list)` — the first element satisfying `pred`, else `nil`.
+fn b_exists(i: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    if args.len() != 2 {
+        return Err(Signal::error("exists: expected (exists predicate list)"));
+    }
+    let list = match &args[1] {
+        Value::List(l) => l,
+        _ => return Err(Signal::error("exists: expected a list")),
+    };
+    for item in list.iter() {
+        if i.call(&args[0], vec![item.clone()])?.is_truthy() {
+            return Ok(item.clone());
+        }
+    }
+    Ok(Value::Nil)
+}
+
+/// `(for-all pred list)` — `true` iff every element satisfies `pred`.
+fn b_for_all(i: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    if args.len() != 2 {
+        return Err(Signal::error("for-all: expected (for-all predicate list)"));
+    }
+    let list = match &args[1] {
+        Value::List(l) => l,
+        _ => return Err(Signal::error("for-all: expected a list")),
+    };
+    for item in list.iter() {
+        if !i.call(&args[0], vec![item.clone()])?.is_truthy() {
+            return Ok(Value::Nil);
+        }
+    }
+    Ok(Value::True)
+}
+
+/// `(transpose matrix)` — swap rows and columns. The result has one row per
+/// column of the first input row and one column per input row; ragged rows are
+/// padded with `nil`, matching newLISP (which sizes the result from the first
+/// row's length and fills missing cells).
+fn b_transpose(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    let rows = match args.first() {
+        Some(Value::List(l)) => l,
+        Some(Value::Nil) | None => return Ok(Value::list(Vec::new())),
+        _ => {
+            return Err(Signal::error(
+                "transpose: expected a matrix (list of lists)",
+            ))
+        }
+    };
+    if rows.is_empty() {
+        return Ok(Value::list(Vec::new()));
+    }
+    // Each input row is treated as a list; a bare atom becomes a 1-element row.
+    let as_row = |v: &Value| -> Vec<Value> {
+        match v {
+            Value::List(l) => l.to_vec(),
+            other => vec![other.clone()],
+        }
+    };
+    let out_rows = as_row(&rows[0]).len();
+    let mut out = Vec::with_capacity(out_rows);
+    for j in 0..out_rows {
+        let mut new_row = Vec::with_capacity(rows.len());
+        for r in rows.iter() {
+            new_row.push(as_row(r).get(j).cloned().unwrap_or(Value::Nil));
+        }
+        out.push(Value::list(new_row));
     }
     Ok(Value::list(out))
 }
