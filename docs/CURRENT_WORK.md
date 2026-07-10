@@ -69,7 +69,7 @@ living, example-driven backlog: the near-term divergences (⚠️) are now fixed
 what remains is **whole unimplemented subsystems (❌)** — best filled one planned
 slice at a time. Highest-value remaining ❌, roughly: **dates/times**
 (`date`/`now`/`date-value`/`date-parse`/`timer` — need timezone handling), small
-binding/HOF leaves (`letn`/`letex`, `global`, `curry`, `series`/`factor`) and the
+binding/HOF leaves (`global`, `curry`, `series`/`factor`) and the
 pattern/reference family (`find-all`/`ref`/`ref-all`/`match`/`pop-assoc` — needs
 newLISP's match + reference/place model), **XML/JSON** (`xml-parse`/`json-parse`), the
 **debugger** (`trace`/`debug`/`error-event`), and **HTTP/UDP**
@@ -125,7 +125,8 @@ round-trip binary strings). Candidates, roughly by value:
   (`ceil`/`floor`/`round`/`sgn`), hyperbolic/`atan2` trig, `bits`,
   `base64-enc`/`base64-dec`, list ops (`count`/`select`/`difference`/`intersect`
   and the higher-order query family `clean`/`index`/`exists`/`for-all`/`transpose`
-  from the WikiBook Lists chapter, 2026-07-06),
+  from the WikiBook Lists chapter, 2026-07-06), binding forms `letn`/`letex`
+  (+ `let` parenthesized/bare-symbol syntax, 2026-07-06),
   reflection predicates (`context?`/`lambda?`/`macro?`/`primitive?`/`bigint?`/
   `protected?`), `title-case`. **Remaining:** XML/JSON (`xml-parse`/`json-parse`),
   dates (`date`/`now`/`date-value` — need timezone handling), symbol reflection

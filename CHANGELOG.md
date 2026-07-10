@@ -9,6 +9,11 @@ All notable changes to niiLISP are documented here. The format is based on
 ### Added
 
 - Higher-order list-query builtins from the WikiBook "Lists" chapter: `(clean pred list)` (`filter` with a negated predicate), `(index pred list)` (the indices where `pred` holds), `(exists pred list)` (the first matching element, else `nil`), `(for-all pred list)` (`true` iff every element matches), and `(transpose matrix)` (swap rows and columns, padding ragged rows with `nil`).
+- The `letn` (sequential-binding `let`, where each initializer sees the bindings made before it) and `letex` (`let` + `expand`: substitute the local values into the body before evaluating) special forms, both accepting the flat `(letn (s1 e1 …) …)` and fully-parenthesized `(letn ((s1 e1) …) …)` syntaxes with optional initializers.
+
+### Changed
+
+- `let` now also accepts newLISP's fully-parenthesized binding form (`(let ((a 1) (b 2)) …)`) alongside the flat form, and a bare symbol in a binding list defaults to `nil` (`(let (y) …)`) instead of erroring.
 
 ## [0.3.2] - 2026-07-06
 

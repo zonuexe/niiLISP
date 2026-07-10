@@ -10,17 +10,17 @@ does each feature the book teaches actually work in niiLISP, and does it behave 
 
 ## Summary
 
-**≈226 ✅ / 14 ⚠️ / 74 ❌** across ~314 probed items (~72% work as the book describes). Counts mix granularities — most chapters count individual functions; ch. 15 counts whole example programs — and a few chapters' own tallies are approximate, so treat these as directional, not exact.
+**≈229 ✅ / 13 ⚠️ / 72 ❌** across ~314 probed items (~73% work as the book describes). Counts mix granularities — most chapters count individual functions; ch. 15 counts whole example programs — and a few chapters' own tallies are approximate, so treat these as directional, not exact.
 
 | # | Chapter | ✅ | ⚠️ | ❌ | Report |
 |---|---------|----|----|----|--------|
 | 1 | The basics | 17 | 1 | 0 | [01-the-basics.md](01-the-basics.md) |
-| 2 | Controlling the flow | 25 | 1 | 3 | [02-controlling-the-flow.md](02-controlling-the-flow.md) |
+| 2 | Controlling the flow | 26 | 1 | 2 | [02-controlling-the-flow.md](02-controlling-the-flow.md) |
 | 3 | Lists | 37 | 1 | 5 | [03-lists.md](03-lists.md) |
 | 4 | Strings | 28 | 0 | 7 | [04-strings.md](04-strings.md) |
 | 5 | Apply and map | 6 | 0 | 2 | [05-apply-and-map.md](05-apply-and-map.md) |
 | 6 | Contexts | 15 | 1 | 2 | [06-contexts.md](06-contexts.md) |
-| 7 | Macros | 4 | 1 | 2 | [07-macros.md](07-macros.md) |
+| 7 | Macros | 6 | 0 | 1 | [07-macros.md](07-macros.md) |
 | 8 | Working with numbers | 31 | 1 | 6 | [08-working-with-numbers.md](08-working-with-numbers.md) |
 | 9 | Working with dates and times | 3 | 0 | 6 | [09-dates-and-times.md](09-dates-and-times.md) |
 | 10 | Working with files | 26 | 2 | 8 | [10-working-with-files.md](10-working-with-files.md) |
@@ -45,7 +45,7 @@ does each feature the book teaches actually work in niiLISP, and does it behave 
 **Recurring smaller gaps** that break book examples across chapters:
 - ~~**`$idx`** loop-index variable~~ — **fixed 2026-07-06**: now populated in `dolist`/`dostring`/`dotree`/`map`/`while`/`until`/`do-while`/`do-until`.
 - ~~**Regex mode** for `find`/`replace` and **`$0..$9`** captures~~ — **fixed 2026-07-06**: regex-mode `find`/`replace`, `$0..$N` binding, and per-match re-evaluation now work; both ch. 15 file-tree editors run.
-- Missing binding/HOF helpers: `letn`, `doargs`, `curry`, `global`, `series`, `factor`, and the pattern/reference family `find-all`/`match`/`ref`/`ref-all`/`pop-assoc` (ch. 2, 3, 5, 8, 15). *(Done 2026-07-06: `clean`, `index`, `exists`, `for-all`, `transpose`.)*
+- Missing binding/HOF helpers: `doargs`, `curry`, `global`, `series`, `factor`, and the pattern/reference family `find-all`/`match`/`ref`/`ref-all`/`pop-assoc` (ch. 2, 3, 5, 8, 15). *(Done 2026-07-06: `clean`, `index`, `exists`, `for-all`, `transpose`, `letn`, `letex`.)*
 - File I/O has holes: `copy-file`, `read-char`, `write-char`, `device`, `search`, `dump`, `pretty-print` unbound; `save` writes an empty file (ch. 10).
 
 ## Corrections applied during verification

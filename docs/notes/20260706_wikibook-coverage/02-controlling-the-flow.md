@@ -1,8 +1,8 @@
 # Ch. 2 — Controlling the flow
 
-Most conditionals, loops, and binding forms work exactly as the WikiBook describes; the notable gaps are the `$idx` loop-index system variable (always `nil`), a completely missing `letn`, and a missing `doargs`.
+Most conditionals, loops, and binding forms work exactly as the WikiBook describes; the remaining gap is a missing `doargs`.
 
-**Coverage: 25 ✅ / 1 ⚠️ / 3 ❌**  *(updated: `$idx` implemented for dolist/dostring/dotree/map/while/until/do-while/do-until)*
+**Coverage: 26 ✅ / 1 ⚠️ / 2 ❌**  *(updated 2026-07-06: `$idx` for dolist/dostring/dotree/map/while/until/do-while/do-until; `letn` implemented)*
 
 > Correction: `dotree` was mis-tested with a two-variable spec `(k v Ctx)`. newLISP's real syntax is `(dotree (sym sym-context [bool]) body)` — a **single** loop variable. With the correct form it works: `(dotree (s Foo) (println s))` iterates `Foo`'s symbols in sorted order. Re-classified ✅.
 
@@ -27,7 +27,7 @@ Most conditionals, loops, and binding forms work exactly as the WikiBook describ
 | `and` (short-circuit) | ✅ | stops at first `nil`, no evaluation of later forms |
 | `or` (short-circuit) | ✅ | stops at first true value |
 | `let` | ✅ | parallel binding confirmed (later binding can't see earlier locals) |
-| `letn` | ❌ | not implemented at all — every invocation errors |
+| `letn` | ✅ | implemented 2026-07-06 — sequential binding (`(letn (x 2 y (pow x 3)) …)`) |
 | `local` | ✅ | uninitialized locals are `nil`; `set` works inside |
 | comma-separated local params, `(x y , a b c)` | ✅ | |
 | `define` (basic + args) | ✅ | |

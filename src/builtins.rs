@@ -1269,7 +1269,7 @@ fn is_lambda_list(interp: &Interp, items: &[Value]) -> bool {
 
 /// Substitute `sym`'s current value into `v`, recursively through lists (but not
 /// into a nested lambda).
-fn expand_symbols(interp: &Interp, v: &Value, syms: &[SymId]) -> Value {
+pub(crate) fn expand_symbols(interp: &Interp, v: &Value, syms: &[SymId]) -> Value {
     match v {
         Value::Symbol(id) if syms.contains(id) => interp.lookup(*id),
         Value::List(items) if !is_lambda_list(interp, items) => Value::list(
