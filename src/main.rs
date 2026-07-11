@@ -15,6 +15,7 @@ mod date;
 mod eval;
 mod ffi;
 mod fileio;
+mod json;
 mod net;
 mod printer;
 mod process;
@@ -22,6 +23,7 @@ mod reader;
 mod repl;
 mod utf8;
 mod value;
+mod xml;
 
 use std::io::Read;
 use std::process::ExitCode;

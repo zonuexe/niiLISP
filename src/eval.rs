@@ -141,6 +141,13 @@ pub struct Interp {
     /// `global?` and unioned into the reader's unqualified-name set so later
     /// reads treat them as MAIN-level (ADR-0026).
     global_syms: RefCell<HashSet<SymId>>,
+    /// The four XML type tags emitted by `xml-parse` (TEXT/CDATA/COMMENT/ELEMENT),
+    /// customizable via `xml-type-tags`; a `nil` slot suppresses that tag (ADR-0038).
+    xml_type_tags: RefCell<[Value; 4]>,
+    /// `("message" position)` from the last `xml-parse` / `json-parse`, read by
+    /// `xml-error` / `json-error`; `Nil` when the last parse succeeded (ADR-0038).
+    xml_error: RefCell<Value>,
+    json_error: RefCell<Value>,
     /// Cilk API state: the pending `spawn`ed children and `share`d pages
     /// (ADR-0032). Present only in the Unix `mt` build.
     #[cfg(all(feature = "mt", unix))]
@@ -280,6 +287,14 @@ impl Interp {
             current_line: RefCell::new(Vec::new()),
             current_ctx: RefCell::new(0),
             global_syms: RefCell::new(HashSet::new()),
+            xml_type_tags: RefCell::new([
+                Value::str(b"TEXT".to_vec()),
+                Value::str(b"CDATA".to_vec()),
+                Value::str(b"COMMENT".to_vec()),
+                Value::str(b"ELEMENT".to_vec()),
+            ]),
+            xml_error: RefCell::new(Value::Nil),
+            json_error: RefCell::new(Value::Nil),
             #[cfg(all(feature = "mt", unix))]
             cilk: RefCell::new(crate::process::CilkState::default()),
             #[cfg(all(feature = "mt", unix))]
@@ -292,6 +307,8 @@ impl Interp {
         crate::process::install(&interp);
         crate::net::install(&interp);
         crate::date::install(&interp);
+        crate::json::install(&interp);
+        crate::xml::install(&interp);
         interp
     }
 
@@ -409,6 +426,32 @@ impl Interp {
     /// later reads keep it unqualified inside contexts (ADR-0026).
     pub fn make_global(&self, sym: SymId) {
         self.global_syms.borrow_mut().insert(sym);
+    }
+
+    /// The four XML type tags (`xml-type-tags`, ADR-0038).
+    pub fn xml_type_tags(&self) -> [Value; 4] {
+        self.xml_type_tags.borrow().clone()
+    }
+
+    pub fn set_xml_type_tags(&self, tags: [Value; 4]) {
+        *self.xml_type_tags.borrow_mut() = tags;
+    }
+
+    /// The `xml-parse`/`json-parse` last-error slots (ADR-0038).
+    pub fn set_xml_error(&self, v: Value) {
+        *self.xml_error.borrow_mut() = v;
+    }
+
+    pub fn get_xml_error(&self) -> Value {
+        self.xml_error.borrow().clone()
+    }
+
+    pub fn set_json_error(&self, v: Value) {
+        *self.json_error.borrow_mut() = v;
+    }
+
+    pub fn get_json_error(&self) -> Value {
+        self.json_error.borrow().clone()
     }
 
     /// Whether a symbol is global: a special form, a registered builtin, a
