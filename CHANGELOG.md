@@ -6,6 +6,8 @@ All notable changes to niiLISP are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-11
+
 ### Added
 
 - **Embedding hardening** ([ADR-0040](docs/adr/0040-embedding-hardening.md)): three follow-ups to the library target that make niiLISP safe to embed for untrusted scripting. **`(exit)` no longer kills the host process** — it returns `Err(Signal::Exit(code))`, which unwinds like any other signal and propagates *past* `catch` (a script cannot suppress it); the CLI still maps a top-level `(exit code)` to that process exit code and the REPL treats it as quit, so CLI behaviour is unchanged. **Host-provided Rust builtins**: `Interp::register_builtin(name, func)` is the public extension point and `BuiltinFn` is re-exported at the crate root, so an embedder can expose its own primitives. **An opt-in eval-step limit**: `Interp::set_eval_limit(Some(n))` bounds one `eval_string` run to `n` eval steps, stopping a runaway script with an uncatchable `Signal::Limit`; off by default (a single `Cell` read on the hot path). `Signal` gains the `Exit(i32)` and `Limit` variants.
@@ -136,7 +138,8 @@ Initial release: a usable command-line interpreter for small newLISP scripts.
 `import`/FFI, networking, bigint, arrays, full UTF-8 character operations, and
 the remaining newLISP standard library.
 
-[Unreleased]: https://github.com/zonuexe/niiLISP/compare/v0.3.2...HEAD
+[Unreleased]: https://github.com/zonuexe/niiLISP/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/zonuexe/niiLISP/releases/tag/v0.4.0
 [0.3.2]: https://github.com/zonuexe/niiLISP/releases/tag/v0.3.2
 [0.3.1]: https://github.com/zonuexe/niiLISP/releases/tag/v0.3.1
 [0.3.0]: https://github.com/zonuexe/niiLISP/releases/tag/v0.3.0
