@@ -161,6 +161,16 @@ Note the RNG distribution for `(random offset scale)` is **uniform**, not
 newLISP's; fine for `qa-bigint` (invariant-based) but revisit if a future script
 depends on the exact distribution.
 
+**Embedding** ([ADR-0039](adr/0039-embedding-library-target.md), 2026-07-11): niiLISP
+now builds a **`[lib]` target** (`use niilisp::{Interp, Value, Signal}`) so it can
+be embedded as an in-process interpreter; the CLI is a thin client of it. Curated
+surface = `Interp`/`Value`/`Signal` (both gained `Debug`); `examples/embed.rs` +
+`tests/embed.rs` cover it. Documented follow-ups worth doing next: an
+embedding-safe `exit` (return a `Signal::Exit(code)` instead of
+`std::process::exit`, so a host isn't killed), a way to register host-provided
+Rust builtins from outside the crate, and a step/resource limit for untrusted
+scripts.
+
 ## Done since v0.1.0
 
 **File I/O + Dictionaries** ([ADR-0029](adr/0029-file-io-slice.md),

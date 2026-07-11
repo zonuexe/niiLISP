@@ -23,6 +23,15 @@ pub enum Signal {
     Error(String),
 }
 
+impl std::fmt::Debug for Signal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Signal::Throw(v) => f.debug_tuple("Throw").field(v).finish(),
+            Signal::Error(m) => f.debug_tuple("Error").field(m).finish(),
+        }
+    }
+}
+
 impl Signal {
     pub fn error(msg: impl Into<String>) -> Signal {
         Signal::Error(msg.into())

@@ -56,6 +56,35 @@ niilisp examples/fib.lsp
 niilisp examples/foop.lsp
 ```
 
+## Embedding niiLISP in a Rust program
+
+niiLISP is also a **library**: link it and run scripts in-process, with no
+subprocess and no IPC ([ADR-0039](docs/adr/0039-embedding-library-target.md)).
+Add it as a dependency and drive an `Interp`:
+
+```rust
+use niilisp::Interp;
+
+let interp = Interp::new();
+interp.eval_string(b"(define (square x) (* x x))").unwrap();
+let v = interp.eval_string(b"(square 9)").unwrap();  // Result<Value, Signal>
+println!("{}", interp.repr(&v));                     // => 81
+```
+
+The intended surface is `niilisp::{Interp, Value, Signal}`; see
+[`examples/embed.rs`](examples/embed.rs) (`cargo run --example embed`). A few
+caveats when embedding:
+
+- **`(exit)` terminates the host process** (it calls `std::process::exit`). Don't
+  run untrusted scripts that might call it.
+- **Single-threaded** — `Interp` is `Rc`/`RefCell`-based (`!Send`/`!Sync`); use
+  one interpreter per thread.
+- **Default features touch the host OS** — the default build enables `mt` (a real
+  `fork()` of the host for `spawn`/`process`), `net`, and `ffi`. For a sandboxed
+  interpreter, depend with `default-features = false` and opt into only what you
+  need (e.g. `bigint`, `regex`, `date`).
+- The `0.x` API is unstable; pin an exact version.
+
 ## Copyright
 
 ```

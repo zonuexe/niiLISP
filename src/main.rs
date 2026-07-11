@@ -10,27 +10,10 @@
 //! niilisp --help        print usage
 //! ```
 
-mod builtins;
-mod date;
-mod eval;
-mod ffi;
-mod fileio;
-mod json;
-mod net;
-mod printer;
-mod process;
-mod reader;
-mod repl;
-mod utf8;
-mod value;
-mod xml;
-
 use std::io::Read;
 use std::process::ExitCode;
 
-use eval::{Interp, Signal};
-use reader::Reader;
-use value::Value;
+use niilisp::Interp;
 
 const USAGE: &str = "\
 niilisp - a re-implementation of the newLISP dialect
@@ -88,7 +71,7 @@ fn main() -> ExitCode {
 
     match args.get(1).map(String::as_str) {
         None => {
-            repl::run(&interp);
+            niilisp::repl::run(&interp);
             ExitCode::SUCCESS
         }
         Some("-h") | Some("--help") => {
@@ -144,29 +127,13 @@ fn run_or_exit(interp: &Interp, src: &[u8]) -> ExitCode {
 }
 
 fn run_source(interp: &Interp, src: &[u8]) -> Result<(), String> {
-    let forms = read_forms(interp, src)?;
+    let forms = niilisp::read_forms(interp, src)?;
     for form in &forms {
         if let Err(sig) = interp.eval(form) {
-            return Err(signal_message(interp, sig));
+            return Err(niilisp::signal_message(interp, sig));
         }
     }
     Ok(())
-}
-
-/// Read all forms, keeping the interner borrow scoped so evaluation can proceed.
-fn read_forms(interp: &Interp, src: &[u8]) -> Result<Vec<Value>, String> {
-    // Collect the MAIN primitive names before borrowing the interner (ADR-0026).
-    let primitives = interp.primitive_names();
-    let mut interner = interp.interner.borrow_mut();
-    let mut reader = Reader::new(src, &mut interner, &primitives);
-    reader.read_all()
-}
-
-fn signal_message(interp: &Interp, sig: Signal) -> String {
-    match sig {
-        Signal::Error(msg) => msg,
-        Signal::Throw(v) => format!("uncaught throw: {}", interp.repr(&v)),
-    }
 }
 
 #[cfg(test)]

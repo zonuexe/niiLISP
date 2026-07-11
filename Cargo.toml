@@ -29,6 +29,12 @@ exclude = [
     "/deny.toml",
 ]
 
+# The library target: embed niiLISP as an in-process interpreter (ADR-0039).
+# `use niilisp::{Interp, Value, Signal}`. The CLI below is a thin client of it.
+[lib]
+name = "niilisp"
+path = "src/lib.rs"
+
 [[bin]]
 name = "niilisp"
 path = "src/main.rs"
