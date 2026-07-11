@@ -22,6 +22,10 @@ All notable changes to niiLISP are documented here. The format is based on
 
 - `let` now also accepts newLISP's fully-parenthesized binding form (`(let ((a 1) (b 2)) …)`) alongside the flat form, and a bare symbol in a binding list defaults to `nil` (`(let (y) …)`) instead of erroring.
 
+### Fixed
+
+- `(expand expr)` with no explicit symbols now expands every upper-case-initial symbol bound to a **non-`nil` value of any type** — including numbers — matching newLISP's PROLOG-mode `expand` (the manual's `(set 'A 1 'C nil) (expand '(A C d))` → `(1 C d)`) and [ADR-0027](docs/adr/0027-lambda-as-list-hybrid.md). It previously expanded only symbols bound to a list or function, so `(let (N 5) (expand '(f N)))` wrongly returned `(f N)` instead of `(f 5)`. This restores the kosh04 pseudo-closure idiom `(define-macro (LAMBDA) (append (lambda) (expand (args))))` used to build lambdas as data.
+
 ## [0.3.2] - 2026-07-06
 
 An audit of niiLISP against the *Introduction to newLISP* WikiBook (`docs/notes/20260706_wikibook-coverage/`) drives this release: it adds the `$idx` loop iterator, regex capture variables, and the `context` reflection forms, and corrects several builtins that behaved differently from newLISP.

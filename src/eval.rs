@@ -3525,22 +3525,35 @@ mod tests {
              (define DEFINE define) \
              (DEFINE ZERO  (LAMBDA (F) (LAMBDA (X) X))) \
              (DEFINE ONE   (LAMBDA (F) (LAMBDA (X) (F X)))) \
-             (DEFINE TWO   (LAMBDA (F) (LAMBDA (X) (F (F X))))) \
              (DEFINE THREE (LAMBDA (F) (LAMBDA (X) (F (F (F X)))))) \
-             (DEFINE (PLUS M N) (LAMBDA (F) (LAMBDA (X) ((M F) ((N F) X))))) \
-             (DEFINE (MULT M N) (LAMBDA (F) (LAMBDA (X) ((N (M F)) X)))) \
              (define (to-number x) ((x (lambda (n) (+ n 1))) 0)) ";
         assert_eq!(as_int(run(&format!("{prelude} (to-number ZERO)"))), 0);
         assert_eq!(as_int(run(&format!("{prelude} (to-number ONE)"))), 1);
         assert_eq!(as_int(run(&format!("{prelude} (to-number THREE)"))), 3);
+        // `(expand expr)` expands upper-case symbols with a non-nil value of any
+        // type, matching newLISP (a number is expanded too — the manual's PROLOG
+        // form): the kosh04 pseudo-closure idiom now works.
         assert_eq!(
-            as_int(run(&format!("{prelude} (to-number (PLUS ONE TWO))"))),
-            3
+            as_int(run(
+                "(define-macro (LAMBDA) (append (lambda) (expand (args)))) \
+                 (define K (LAMBDA (X) (LAMBDA (Y) X))) ((K 1) 2)"
+            )),
+            1
         );
+        // A church-encoded integer folding a plain increment, via the same idiom.
         assert_eq!(
-            as_int(run(&format!("{prelude} (to-number (MULT TWO THREE))"))),
-            6
+            as_int(run(
+                "(define-macro (LAMBDA) (append (lambda) (expand (args)))) \
+                 (define (encodeInt N) \
+                   (LAMBDA (F) (LAMBDA (X) (let (acc X) (dotimes (i N) (set 'acc (F acc))) acc)))) \
+                 (((encodeInt 5) (lambda (n) (+ n 1))) 0)"
+            )),
+            5
         );
+        // Note: `PLUS`/`MULT` on nested church numerals hit the gist's documented
+        // reused-variable hazard under dynamic scoping (a bound `X` gets expanded
+        // into a parameter position on macro re-fire) — the same in newLISP, which
+        // is now the authoritative behaviour (ADR-0027 / expand PROLOG form).
     }
 
     #[test]
@@ -3554,9 +3567,14 @@ mod tests {
         );
         // (args) is the unbound argument tail of the current fexpr.
         assert!(is_true("(define-macro (m) (args)) (= (m a b c) '(a b c))"));
-        // expand substitutes explicit symbols; upper-case auto-expand takes code.
+        // expand substitutes explicit symbols; the no-symbol form auto-expands
+        // upper-case symbols with a non-nil value of any type (newLISP's PROLOG
+        // form), so a number is expanded too but a lower-case symbol is not.
         assert!(is_true(
             "(set 'A '(+ 1 2)) (= (expand '(x A) 'A) '(x (+ 1 2)))"
+        ));
+        assert!(is_true(
+            "(set 'A 1 'C nil) (= (expand '(A (x) C d)) '(1 (x) C d))"
         ));
         // A special form can be aliased as a first-class value.
         assert_eq!(as_int(run("(define IF if) (IF (= 1 1) 10 20)")), 10);
