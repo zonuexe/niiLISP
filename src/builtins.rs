@@ -63,6 +63,9 @@ pub fn install(interp: &Interp) {
     reg("parse", b_parse);
     reg("count", b_count);
     reg("select", b_select);
+    reg("ref", b_ref);
+    reg("ref-all", b_ref_all);
+    reg("match", b_match);
     reg("difference", b_difference);
     reg("intersect", b_intersect);
     // Reflection predicates and title-case (self-contained fill-ins).
@@ -1701,6 +1704,189 @@ fn b_transpose(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
         out.push(Value::list(new_row));
     }
     Ok(Value::list(out))
+}
+
+// ---- reference / query model (ADR-0036) ----------------------------------
+
+/// Whether `key` matches `elem`: by `func-compare` `(cmp key elem)` if given,
+/// otherwise by structural equality.
+fn ref_matches(i: &Interp, key: &Value, elem: &Value, cmp: Option<&Value>) -> Result<bool, Signal> {
+    match cmp {
+        Some(f) => Ok(i.call(f, vec![key.clone(), elem.clone()])?.is_truthy()),
+        None => Ok(values_equal(key, elem)),
+    }
+}
+
+/// Depth-first walk collecting the index paths (and elements) at which `key`
+/// matches inside a nested list. Returns `true` once a match is recorded when
+/// `all` is false, so callers can stop at the first hit.
+fn ref_walk(
+    i: &Interp,
+    key: &Value,
+    list: &Value,
+    cmp: Option<&Value>,
+    all: bool,
+    path: &mut Vec<i64>,
+    out: &mut Vec<(Vec<i64>, Value)>,
+) -> Result<bool, Signal> {
+    if let Value::List(items) = list {
+        for (idx, elem) in items.iter().enumerate() {
+            path.push(idx as i64);
+            if ref_matches(i, key, elem, cmp)? {
+                out.push((path.clone(), elem.clone()));
+                if !all {
+                    path.pop();
+                    return Ok(true);
+                }
+            } else if matches!(elem, Value::List(_)) && ref_walk(i, key, elem, cmp, all, path, out)?
+            {
+                path.pop();
+                return Ok(true);
+            }
+            path.pop();
+        }
+    }
+    Ok(false)
+}
+
+/// A comparator argument, ignoring the boolean `true`/`nil` flag positions.
+fn ref_cmp(args: &[Value], at: usize) -> Option<&Value> {
+    args.get(at)
+        .filter(|v| !matches!(v, Value::Nil | Value::True))
+}
+
+fn path_value(path: &[i64]) -> Value {
+    Value::list(path.iter().map(|&n| Value::Int(n)).collect())
+}
+
+/// `(ref key list [compare])` — the index path to the first match, or `()`.
+fn b_ref(i: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    if args.len() < 2 {
+        return Err(Signal::error("ref: expected (ref key list [compare])"));
+    }
+    let cmp = ref_cmp(args, 2);
+    let mut out = Vec::new();
+    let mut path = Vec::new();
+    ref_walk(i, &args[0], &args[1], cmp, false, &mut path, &mut out)?;
+    Ok(match out.first() {
+        Some((p, _)) => path_value(p),
+        None => Value::list(Vec::new()),
+    })
+}
+
+/// `(ref-all key list [compare [true]])` — every index path (or, with the
+/// trailing `true`, the matching elements). Sets `$count` to the number found.
+fn b_ref_all(i: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    if args.len() < 2 {
+        return Err(Signal::error(
+            "ref-all: expected (ref-all key list [compare [true]])",
+        ));
+    }
+    let cmp = ref_cmp(args, 2);
+    let want_elems = args[2..].iter().any(|v| matches!(v, Value::True));
+    let mut out = Vec::new();
+    let mut path = Vec::new();
+    ref_walk(i, &args[0], &args[1], cmp, true, &mut path, &mut out)?;
+    i.set_global(i.intern("$count"), Value::Int(out.len() as i64));
+    let items = out
+        .into_iter()
+        .map(|(p, elem)| if want_elems { elem } else { path_value(&p) })
+        .collect();
+    Ok(Value::list(items))
+}
+
+/// Recursively match `pat` against `tgt`, appending each wildcard's binding to
+/// `out` (one element per `?`, a sub-list per `+`/`*`). `+`/`*` are greedy with
+/// backtracking. `w` holds the interned `?`/`+`/`*` symbol ids.
+fn match_seq(pat: &[Value], tgt: &[Value], w: (SymId, SymId, SymId), out: &mut Vec<Value>) -> bool {
+    let (q, plus, star) = w;
+    let Some(p0) = pat.first() else {
+        return tgt.is_empty();
+    };
+    let rest = &pat[1..];
+    if let Value::Symbol(id) = p0 {
+        if *id == q {
+            // exactly one element
+            if tgt.is_empty() {
+                return false;
+            }
+            let mark = out.len();
+            out.push(tgt[0].clone());
+            if match_seq(rest, &tgt[1..], w, out) {
+                return true;
+            }
+            out.truncate(mark);
+            return false;
+        }
+        if *id == plus || *id == star {
+            let min = if *id == plus { 1 } else { 0 };
+            // Greedy: consume as many as possible, backtracking toward `min`.
+            let mut k = tgt.len();
+            loop {
+                if k < min {
+                    return false;
+                }
+                let mark = out.len();
+                out.push(Value::list(tgt[..k].to_vec()));
+                if match_seq(rest, &tgt[k..], w, out) {
+                    return true;
+                }
+                out.truncate(mark);
+                if k == 0 {
+                    return false;
+                }
+                k -= 1;
+            }
+        }
+    }
+    // Literal or nested-list pattern element: must match tgt[0] exactly.
+    let Some(t0) = tgt.first() else {
+        return false;
+    };
+    let mark = out.len();
+    let matched = match (p0, t0) {
+        (Value::List(pp), Value::List(tt)) => match_seq(pp, tt, w, out),
+        _ => values_equal(p0, t0),
+    };
+    if matched && match_seq(rest, &tgt[1..], w, out) {
+        return true;
+    }
+    out.truncate(mark);
+    false
+}
+
+/// Whether `pattern` matches `target` under the `?`/`+`/`*` wildcards — the
+/// boolean core of `match`, for `find-all`'s list-pattern form (which must
+/// distinguish "matched with no bindings" `()` from "no match").
+pub(crate) fn pattern_matches(i: &Interp, pattern: &Value, target: &Value) -> bool {
+    match (pattern, target) {
+        (Value::List(p), Value::List(t)) => {
+            let w = (i.intern("?"), i.intern("+"), i.intern("*"));
+            let mut out = Vec::new();
+            match_seq(p, t, w, &mut out)
+        }
+        _ => values_equal(pattern, target),
+    }
+}
+
+/// `(match pattern list)` — match with the `?`/`+`/`*` wildcards, returning the
+/// list of matched expressions, or `nil` on no match.
+fn b_match(i: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    if args.len() < 2 {
+        return Err(Signal::error("match: expected (match pattern list)"));
+    }
+    let (pat, tgt) = match (&args[0], &args[1]) {
+        (Value::List(p), Value::List(t)) => (p.clone(), t.clone()),
+        // A non-list pattern matches by plain equality.
+        _ => return Ok(boolean(values_equal(&args[0], &args[1]))),
+    };
+    let w = (i.intern("?"), i.intern("+"), i.intern("*"));
+    let mut out = Vec::new();
+    if match_seq(&pat, &tgt, w, &mut out) {
+        Ok(Value::list(out))
+    } else {
+        Ok(Value::Nil)
+    }
 }
 
 fn b_dup(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
