@@ -10,7 +10,7 @@ does each feature the book teaches actually work in niiLISP, and does it behave 
 
 ## Summary
 
-**≈248 ✅ / 12 ⚠️ / 56 ❌** across ~314 probed items (~79% work as the book describes). Counts mix granularities — most chapters count individual functions; ch. 15 counts whole example programs — and a few chapters' own tallies are approximate, so treat these as directional, not exact.
+**≈255 ✅ / 12 ⚠️ / 49 ❌** across ~314 probed items (~81% work as the book describes). Counts mix granularities — most chapters count individual functions; ch. 15 counts whole example programs — and a few chapters' own tallies are approximate, so treat these as directional, not exact.
 
 | # | Chapter | ✅ | ⚠️ | ❌ | Report |
 |---|---------|----|----|----|--------|
@@ -25,7 +25,7 @@ does each feature the book teaches actually work in niiLISP, and does it behave 
 | 9 | Working with dates and times | 8 | 0 | 1 | [09-dates-and-times.md](09-dates-and-times.md) |
 | 10 | Working with files | 26 | 2 | 8 | [10-working-with-files.md](10-working-with-files.md) |
 | 11 | Multitasking | 10 | 2 | 2 | [11-multitasking.md](11-multitasking.md) |
-| 12 | Working with XML | 1 | 0 | 6 | [12-working-with-xml.md](12-working-with-xml.md) |
+| 12 | Working with XML | 8 | 0 | 0 | [12-working-with-xml.md](12-working-with-xml.md) |
 | 13 | The debugger | 2 | 0 | 7 | [13-the-debugger.md](13-the-debugger.md) |
 | 14 | The Internet | 11 | 1 | 10 | [14-the-internet.md](14-the-internet.md) |
 | 15 | More examples (programs) | 4 | 0 | 2 | [15-more-examples.md](15-more-examples.md) |
@@ -37,7 +37,7 @@ does each feature the book teaches actually work in niiLISP, and does it behave 
 
 **Whole subsystems absent (the bulk of the ❌).** These cluster, matching the earlier [gap analysis](../20260706_newlisp-gap-analysis.md):
 - ~~**Dates & times** (ch. 9)~~ — **implemented 2026-07-06** (ADR-0037): `date`/`now`/`date-value`/`date-list`/`date-parse`; only the `timer` scheduler remains.
-- **XML / JSON** (ch. 12) — no `xml-parse`/`xml-type-tags`/`json-parse` at all.
+- ~~**XML / JSON** (ch. 12)~~ — **implemented 2026-07-06** (ADR-0038): `xml-parse`/`xml-type-tags`/`xml-error`/`json-parse`/`json-error`, hand-rolled pure-Rust parsers.
 - **Debugger** (ch. 13) — no `trace`/`debug`/`error-event` family; only `catch`/`throw`.
 - **HTTP & UDP** (ch. 14) — `get-url`/`put-url`/`post-url` and all UDP/`net-lookup`/`net-eval` missing (stream sockets present).
 - **newLISP-GS GUI** (ch. 16) — the book's JVM `guiserver.lsp` path will never run; niiLISP ships an architecturally different opt-in **fltk** helper (ADR-0034), but every non-visual prerequisite (`load`/`env`/`process`/`net-*`/`base64`/`eval-string`) is present.
