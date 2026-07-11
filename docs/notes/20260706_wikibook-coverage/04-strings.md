@@ -1,8 +1,8 @@
 # Ch. 4 — Strings
 
-Core string construction, case conversion, slicing, and `find`/`replace` (literal **and** regex mode, with `$0..$9` captures and per-match expression evaluation) all work as documented. Remaining gaps: `date`, `find-all`, `encrypt`, string-index `setf`/`push`/`pop`, and string-native `select`.
+Core string construction, case conversion, slicing, and `find`/`replace` (literal **and** regex mode, with `$0..$9` captures and per-match expression evaluation) all work as documented. Remaining gaps: `date`, `encrypt`, string-index `setf`/`push`/`pop`, and string-native `select`.
 
-**Coverage: 28 ✅ / 0 ⚠️ / 7 ❌**  *(updated: regex-mode `find`/`replace`, `$0..$9`, per-match re-eval)*
+**Coverage: 29 ✅ / 0 ⚠️ / 6 ❌**  *(updated: regex-mode `find`/`replace`, `$0..$9`, per-match re-eval; `find-all` 2026-07-06)*
 
 | Feature | Status | Notes |
 |---|---|---|
@@ -33,7 +33,7 @@ Core string construction, case conversion, slicing, and `find`/`replace` (litera
 | `pop` on string place | ❌ | `pop: place is not a list` / `not a valid place` |
 | `find` (literal substring) | ✅ | |
 | `find` with regex flag `0` | ✅ | Engages the regex engine, returns the match offset, binds `$0..$N` (fixed 2026-07-06) |
-| `find-all` | ❌ | Unbound symbol |
+| `find-all` | ✅ | implemented 2026-07-06 (ADR-0036); regex form returns all matches, optional per-match transform with `$0..$N` |
 | `starts-with` / `ends-with` | ✅ | |
 | `regex` (capture groups, positions) | ✅ | returns full match/position/group tuple correctly |
 | `member` on strings | ✅ | |
@@ -91,11 +91,12 @@ Xlo world
 Both now engage the regex engine and bind `$0..$N`. (Note the `.lsp`-string
 escaping: a regex `\w` is written `"\\w"` in niiLISP source.)
 
-### `find-all` is unbound
+### ~~`find-all` is unbound~~ — FIXED 2026-07-06
 ```
-$ echo '(println (find-all "[aeiou]{2,}" "beautiful ocean maintain" $0))' | niilisp -
-niilisp: not a function: nil
+$ niilisp -e '(println (find-all "[aeiou]{2,}" "beautiful ocean maintain" $0))'
+("eau" "ea" "ai" "ai")
 ```
+Implemented under [ADR-0036](../../adr/0036-reference-and-query-model.md); the optional expression is evaluated per match with `$0..$N` bound.
 
 ### ~~`$0`..`$9` capture variables never populated~~ — FIXED 2026-07-06
 ```

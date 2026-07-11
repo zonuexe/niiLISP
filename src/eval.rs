@@ -69,6 +69,8 @@ pub const SPECIAL_FORMS: &[&str] = &[
     "replace",
     "set-ref",
     "set-ref-all",
+    "find-all",
+    "pop-assoc",
     "begin",
     "define",
     "set",
@@ -1030,6 +1032,8 @@ impl Interp {
             "replace" => self.sf_replace(args),
             "set-ref" => self.sf_setref(args, false),
             "set-ref-all" => self.sf_setref(args, true),
+            "find-all" => self.sf_find_all(args),
+            "pop-assoc" => self.sf_pop_assoc(args),
             "begin" => self.eval_body(args),
             "define" => self.sf_define(args),
             "set" => self.sf_set(args, true),
@@ -1691,20 +1695,45 @@ impl Interp {
         self.eval_body(&args[1..])
     }
 
+    /// Collect an index path from a run of arguments, each evaluating to an
+    /// integer (one step) or a list of integers (a full path) — so `push`/`pop`
+    /// accept both `(pop L 1 0)` and `(pop L (ref key L))` (ADR-0036).
+    fn index_path(&self, args: &[Value]) -> Result<Vec<i64>, Signal> {
+        let mut path = Vec::new();
+        for e in args {
+            match self.eval(e)? {
+                Value::Int(n) => path.push(n),
+                Value::List(l) => {
+                    for v in l.iter() {
+                        match v {
+                            Value::Int(n) => path.push(*n),
+                            _ => return Err(Signal::error("index path must be integers")),
+                        }
+                    }
+                }
+                Value::Nil => {}
+                _ => {
+                    return Err(Signal::error(
+                        "index must be an integer or a list of integers",
+                    ))
+                }
+            }
+        }
+        Ok(path)
+    }
+
     fn sf_push(&self, args: &[Value]) -> Result<Value, Signal> {
-        // (push value place [index]) — place designates a list (or nil -> list).
+        // (push value place [index...]) — place designates a list (or nil ->
+        // list). Trailing indices navigate a nested list; the last is the
+        // insertion position (ADR-0036).
         if args.len() < 2 {
             return Err(Signal::error("push: expected (push value place [index])"));
         }
         let value = self.eval(&args[0])?;
-        let place = self.resolve_place(&args[1])?;
-        let index = match args.get(2) {
-            Some(e) => match self.eval(e)? {
-                Value::Int(n) => Some(n),
-                _ => return Err(Signal::error("push: index must be an integer")),
-            },
-            None => None,
-        };
+        let mut place = self.resolve_place(&args[1])?;
+        let mut idxpath = self.index_path(&args[2..])?;
+        let index = idxpath.pop();
+        place.path.extend(idxpath);
         self.with_place_mut(&place, move |loc| {
             let list = match loc {
                 Value::List(l) => Rc::make_mut(l),
@@ -1750,18 +1779,15 @@ impl Interp {
     }
 
     fn sf_pop(&self, args: &[Value]) -> Result<Value, Signal> {
-        // (pop place [index]) — remove and return an element from a list place.
-        let place = self.resolve_place(
+        // (pop place [index...]) — remove and return an element. Trailing indices
+        // navigate a nested list; the last is the position (ADR-0036).
+        let mut place = self.resolve_place(
             args.first()
                 .ok_or_else(|| Signal::error("pop: expected a place"))?,
         )?;
-        let index = match args.get(1) {
-            Some(e) => match self.eval(e)? {
-                Value::Int(n) => n,
-                _ => return Err(Signal::error("pop: index must be an integer")),
-            },
-            None => 0,
-        };
+        let mut idxpath = self.index_path(&args[1..])?;
+        let index = idxpath.pop().unwrap_or(0);
+        place.path.extend(idxpath);
         self.with_place_mut(&place, move |loc| {
             let list = match loc {
                 Value::List(l) => Rc::make_mut(l),
@@ -2168,6 +2194,124 @@ impl Interp {
         let new = self.eval(&args[2])?;
         self.place_or_value(&args[1], |loc| {
             deep_replace(loc, &key, &new, all);
+        })
+    }
+
+    fn sf_find_all(&self, args: &[Value]) -> Result<Value, Signal> {
+        // (find-all pattern data [exp [option|compare]]) — collect every match.
+        // `exp` (deferred) transforms each hit with `$it`/`$0..$N` bound; without
+        // it, the hit itself (the match string / the element) is collected. Sets
+        // `$count`. Three forms (ADR-0036): regex over a string, a list-pattern
+        // over a list, or a key over a list.
+        if args.len() < 2 {
+            return Err(Signal::error(
+                "find-all: expected (find-all pattern data [exp])",
+            ));
+        }
+        let pattern = self.eval(&args[0])?;
+        let data = self.eval(&args[1])?;
+        let exp = args.get(2);
+        let it_sym = self.intern("$it");
+        let mut out = Vec::new();
+
+        // Evaluate `exp` (or fall back to `hit`) with `$it` bound to `hit`.
+        let collect = |this: &Self, hit: Value, out: &mut Vec<Value>| -> Result<(), Signal> {
+            let v = match exp {
+                Some(e) => {
+                    let mut scope = Scope::new(this);
+                    scope.bind(it_sym, hit);
+                    this.eval(e)?
+                }
+                None => hit,
+            };
+            out.push(v);
+            Ok(())
+        };
+
+        match (&pattern, &data) {
+            // Regex over text.
+            (Value::Str(pat), Value::Str(text)) => {
+                #[cfg(feature = "regex")]
+                {
+                    let opt = match args.get(3) {
+                        Some(e) => match self.eval(e)? {
+                            Value::Int(n) => n,
+                            _ => 0,
+                        },
+                        None => 0,
+                    };
+                    let pat = String::from_utf8_lossy(pat).into_owned();
+                    let re = self.compiled_regex(&pat, opt)?;
+                    // Collect match spans first so the borrow on `text` ends
+                    // before evaluating `exp`.
+                    let hits: Vec<(Vec<u8>, regex::bytes::Captures)> = re
+                        .captures_iter(text)
+                        .map(|c| (c.get(0).unwrap().as_bytes().to_vec(), c))
+                        .collect();
+                    for (whole, caps) in hits {
+                        self.set_regex_captures(&caps);
+                        collect(self, Value::str(whole), &mut out)?;
+                    }
+                }
+                #[cfg(not(feature = "regex"))]
+                {
+                    let _ = (pat, text);
+                    return Err(Signal::error("find-all: regex support is not built in"));
+                }
+            }
+            // Pattern or key over a list.
+            (_, Value::List(items)) => {
+                let cmp = match args.get(3) {
+                    Some(e) => Some(self.eval(e)?),
+                    None => None,
+                };
+                for el in items.iter() {
+                    let hit = if matches!(pattern, Value::List(_)) {
+                        crate::builtins::pattern_matches(self, &pattern, el)
+                    } else if let Some(f) = &cmp {
+                        self.call(f, vec![pattern.clone(), el.clone()])?.is_truthy()
+                    } else {
+                        crate::builtins::values_equal(&pattern, el)
+                    };
+                    if hit {
+                        collect(self, el.clone(), &mut out)?;
+                    }
+                }
+            }
+            _ => {
+                return Err(Signal::error(
+                    "find-all: expected a string or a list to search",
+                ))
+            }
+        }
+
+        self.set_global(self.intern("$count"), Value::Int(out.len() as i64));
+        Ok(Value::list(out))
+    }
+
+    fn sf_pop_assoc(&self, args: &[Value]) -> Result<Value, Signal> {
+        // (pop-assoc key assoc-list) — remove and return the (key …) pair from
+        // an association list place (ADR-0036).
+        if args.len() < 2 {
+            return Err(Signal::error(
+                "pop-assoc: expected (pop-assoc key assoc-list)",
+            ));
+        }
+        let key = self.eval(&args[0])?;
+        let place = self.resolve_place(&args[1])?;
+        self.with_place_mut(&place, move |loc| {
+            let list = match loc {
+                Value::List(l) => Rc::make_mut(l),
+                _ => return Ok(Value::Nil),
+            };
+            let found = list.iter().position(|item| {
+                matches!(item, Value::List(pair)
+                    if pair.first().is_some_and(|k| crate::builtins::values_equal(k, &key)))
+            });
+            match found {
+                Some(idx) => Ok(list.remove(idx)),
+                None => Ok(Value::Nil),
+            }
         })
     }
 
