@@ -59,7 +59,38 @@ what is deliberately deferred, so work can resume without re-deriving context.
   `min`/`max`/`even?`/`odd?`/`flat`/`join`/`member`/`unique`/`true?`, and the
   `dostring`/`until`/`extend`/`swap` special forms.
 
-## Next task — pick up here: choose the next slice
+## Next task — pick up here: cut the v0.4.0 release
+
+ADR-0040 (embedding hardening) is **implemented** — see "Embedding hardening
+landed" just below. The remaining task is the release itself.
+
+**Cut the release.** Follow the `niilisp-release-prep` skill. `[Unreleased]`
+has accumulated a large arc since v0.3.2 (reference/query model, dates, XML/JSON,
+the `expand` fix, the library target, and this hardening slice) — this is a
+**minor** bump (new features, backward-compatible): **v0.4.0**. Seal the changelog,
+reconcile the README, regenerate `THIRD-PARTY-LICENSES.md`, open the release PR,
+get CI green + a human Go, then tag.
+
+### Embedding hardening landed (ADR-0040, 2026-07-11)
+
+The three ADR-0039 follow-ups are done (branch `docs/adr-0040-embedding-hardening`,
+not yet a separate PR): **`Signal` grew `Exit(i32)` + `Limit`** (both propagate
+past `catch`); **`(exit)` returns `Err(Signal::Exit(code))`** instead of
+`std::process::exit` — the CLI still maps a top-level one to its process exit code
+(verified byte-identical: `-e '(exit 3)'` → code 3) and the REPL treats it as
+quit; **host builtins** via the already-`pub` `Interp::register_builtin` +
+re-exported `niilisp::BuiltinFn`; and an **opt-in eval-step limit**
+(`Interp::set_eval_limit(Some(n))` → uncatchable `Signal::Limit`, counter reset
+per `eval_string`, single-`Cell`-read hot path when unset). Updated: the two
+`sf_catch` arms, `signal_message`, the `ffi` callback match, and a unit-test
+match. Tests: five new `tests/embed.rs` cases + a `register_builtin` doctest; full
+suite green under default and `--no-default-features`, clippy + fmt clean.
+**Deferred (recorded in the ADR):** closure/`Box<dyn Fn>` builtins (need
+`Value::Builtin` widened) and runtime sandboxing of the OS-touching builtins.
+
+---
+
+### Backlog beyond ADR-0040 (unchanged)
 
 A gap analysis vs newLISP ([`notes/20260706_newlisp-gap-analysis.md`](notes/20260706_newlisp-gap-analysis.md))
 found ~221 of 378 primitives missing, clustered into whole unbuilt subsystems
@@ -165,11 +196,11 @@ depends on the exact distribution.
 now builds a **`[lib]` target** (`use niilisp::{Interp, Value, Signal}`) so it can
 be embedded as an in-process interpreter; the CLI is a thin client of it. Curated
 surface = `Interp`/`Value`/`Signal` (both gained `Debug`); `examples/embed.rs` +
-`tests/embed.rs` cover it. Documented follow-ups worth doing next: an
-embedding-safe `exit` (return a `Signal::Exit(code)` instead of
-`std::process::exit`, so a host isn't killed), a way to register host-provided
-Rust builtins from outside the crate, and a step/resource limit for untrusted
-scripts.
+`tests/embed.rs` cover it. The three documented follow-ups — an embedding-safe
+`exit`, host-provided Rust builtins, and an eval-step limit — **all landed in
+[ADR-0040](adr/0040-embedding-hardening.md)** (see "Embedding hardening landed"
+above). Still deferred: closure/`Box<dyn Fn>` builtins and runtime sandboxing of
+the OS-touching builtins.
 
 ## Done since v0.1.0
 
