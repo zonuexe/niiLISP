@@ -2866,11 +2866,15 @@ fn b_array_list(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
 }
 
 fn b_exit(_: &Interp, args: &[Value]) -> Result<Value, Signal> {
+    // An embedding-safe exit: unwind with a control signal instead of calling
+    // `std::process::exit`, so a host embedding the interpreter is never killed
+    // behind its back (ADR-0040). The CLI maps a top-level one to its process
+    // exit code; the REPL treats it as quit; `catch` cannot trap it.
     let code = match args.first() {
         Some(Value::Int(n)) => *n as i32,
         _ => 0,
     };
-    std::process::exit(code);
+    Err(Signal::Exit(code))
 }
 
 fn type_name(v: &Value) -> &'static str {

@@ -13,7 +13,7 @@
 use std::io::Read;
 use std::process::ExitCode;
 
-use niilisp::Interp;
+use niilisp::{Interp, Signal};
 
 const USAGE: &str = "\
 niilisp - a re-implementation of the newLISP dialect
@@ -116,22 +116,23 @@ fn main() -> ExitCode {
 }
 
 /// Run a whole source, reporting a runtime error to stderr with exit code 1.
+/// A top-level `(exit code)` maps to that process exit code (ADR-0040), so the
+/// CLI's observable exit behaviour is unchanged.
 fn run_or_exit(interp: &Interp, src: &[u8]) -> ExitCode {
     match run_source(interp, src) {
         Ok(()) => ExitCode::SUCCESS,
-        Err(msg) => {
-            eprintln!("niilisp: {}", msg);
+        Err(Signal::Exit(code)) => ExitCode::from(code as u8),
+        Err(sig) => {
+            eprintln!("niilisp: {}", niilisp::signal_message(interp, sig));
             ExitCode::FAILURE
         }
     }
 }
 
-fn run_source(interp: &Interp, src: &[u8]) -> Result<(), String> {
-    let forms = niilisp::read_forms(interp, src)?;
+fn run_source(interp: &Interp, src: &[u8]) -> Result<(), Signal> {
+    let forms = niilisp::read_forms(interp, src).map_err(Signal::error)?;
     for form in &forms {
-        if let Err(sig) = interp.eval(form) {
-            return Err(niilisp::signal_message(interp, sig));
-        }
+        interp.eval(form)?;
     }
     Ok(())
 }

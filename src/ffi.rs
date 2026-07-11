@@ -318,6 +318,16 @@ unsafe extern "C" fn trampoline(
             eprintln!("callback: uncaught throw");
             Value::Nil
         }
+        // A callback body cannot unwind past the C caller, so `(exit)` / the
+        // step limit collapse to nil here (ADR-0040).
+        Err(Signal::Exit(_)) => {
+            eprintln!("callback: exit");
+            Value::Nil
+        }
+        Err(Signal::Limit) => {
+            eprintln!("callback: eval-step limit exceeded");
+            Value::Nil
+        }
     };
 
     let as_i64 = |v: &Value| match v {

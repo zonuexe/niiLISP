@@ -72,17 +72,51 @@ println!("{}", interp.repr(&v));                     // => 81
 ```
 
 The intended surface is `niilisp::{Interp, Value, Signal}`; see
-[`examples/embed.rs`](examples/embed.rs) (`cargo run --example embed`). A few
-caveats when embedding:
+[`examples/embed.rs`](examples/embed.rs) (`cargo run --example embed`).
 
-- **`(exit)` terminates the host process** (it calls `std::process::exit`). Don't
-  run untrusted scripts that might call it.
+### Extending and hardening ([ADR-0040](docs/adr/0040-embedding-hardening.md))
+
+- **`(exit)` is embedding-safe** — it no longer kills the host. It returns
+  `Err(Signal::Exit(code))`, which unwinds like any other signal and propagates
+  *past* `catch` (a script cannot suppress it). Match on it and decide what to do:
+
+  ```rust
+  match interp.eval_string(b"(exit 3)") {
+      Err(niilisp::Signal::Exit(code)) => println!("script exited with {code}"),
+      other => { /* … */ }
+  }
+  ```
+
+- **Register host builtins** — expose your own Rust primitives with
+  `Interp::register_builtin(name, func)` (the signature is the re-exported
+  `niilisp::BuiltinFn`):
+
+  ```rust
+  fn host_answer(_: &niilisp::Interp, _: &[niilisp::Value])
+      -> Result<niilisp::Value, niilisp::Signal> {
+      Ok(niilisp::Value::Int(42))
+  }
+  interp.register_builtin("host-answer", host_answer);
+  // (host-answer) now evaluates to 42.
+  ```
+
+  (Closures that capture host state are a deferred follow-up; thread state
+  through the interpreter's own globals in the meantime.)
+
+- **Bound untrusted scripts** — `interp.set_eval_limit(Some(1_000_000))` stops one
+  `eval_string` run after that many eval steps with an uncatchable
+  `Signal::Limit`, so a runaway loop can't hang the host. Off by default (a single
+  `Cell` read on the hot path); the counter resets each `eval_string`.
+
+A few more caveats when embedding:
+
 - **Single-threaded** — `Interp` is `Rc`/`RefCell`-based (`!Send`/`!Sync`); use
   one interpreter per thread.
 - **Default features touch the host OS** — the default build enables `mt` (a real
-  `fork()` of the host for `spawn`/`process`), `net`, and `ffi`. For a sandboxed
-  interpreter, depend with `default-features = false` and opt into only what you
-  need (e.g. `bigint`, `regex`, `date`).
+  `fork()` of the host for `spawn`/`process`), `net`, and `ffi`. The step limit
+  bounds CPU, not these OS-touching builtins; for a sandboxed interpreter, depend
+  with `default-features = false` and opt into only what you need (e.g. `bigint`,
+  `regex`, `date`).
 - The `0.x` API is unstable; pin an exact version.
 
 ## Copyright

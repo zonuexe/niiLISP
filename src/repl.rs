@@ -12,7 +12,7 @@
 //! Both share the crate-level `read_forms` / `signal_message` helpers so the
 //! read/eval/print behaviour stays identical; only the input layer differs.
 
-use crate::eval::Interp;
+use crate::eval::{Interp, Signal};
 
 /// A form is "complete enough to submit" unless the reader stopped mid-token —
 /// an unclosed list, string, brace string, tag string, or a bare end-of-input.
@@ -24,20 +24,26 @@ fn input_is_incomplete(err: &str) -> bool {
 
 /// Evaluate every form in `line`, printing each result (or error) — the shared
 /// "print" half of the loop, used by both front-ends once a line is in hand.
-fn eval_line(interp: &Interp, line: &[u8]) {
+/// Returns `false` when a form asked the REPL to quit (`(exit)`), so the caller
+/// breaks its read loop (ADR-0040).
+fn eval_line(interp: &Interp, line: &[u8]) -> bool {
     let forms = match crate::read_forms(interp, line) {
         Ok(f) => f,
         Err(e) => {
             eprintln!("read error: {}", e);
-            return;
+            return true;
         }
     };
     for form in &forms {
         match interp.eval(form) {
             Ok(v) => println!("{}", interp.repr(&v)),
+            // `(exit)` unwinds as a control signal now (ADR-0040); in the REPL
+            // that means quit.
+            Err(Signal::Exit(_)) => return false,
             Err(sig) => eprintln!("{}", crate::signal_message(interp, sig)),
         }
     }
+    true
 }
 
 // ---------------------------------------------------------------------------
@@ -189,7 +195,9 @@ mod editing {
                         continue;
                     }
                     let _ = rl.add_history_entry(line.as_str());
-                    eval_line(interp, line.as_bytes());
+                    if !eval_line(interp, line.as_bytes()) {
+                        break;
+                    }
                 }
                 Err(ReadlineError::Interrupted) => continue, // Ctrl-C: drop the line
                 Err(ReadlineError::Eof) => break,            // Ctrl-D: exit
@@ -239,7 +247,9 @@ mod basic {
             if line.trim().is_empty() {
                 continue;
             }
-            eval_line(interp, line.as_bytes());
+            if !eval_line(interp, line.as_bytes()) {
+                break;
+            }
         }
     }
 }

@@ -59,48 +59,34 @@ what is deliberately deferred, so work can resume without re-deriving context.
   `min`/`max`/`even?`/`odd?`/`flat`/`join`/`member`/`unique`/`true?`, and the
   `dostring`/`until`/`extend`/`swap` special forms.
 
-## Next task — pick up here: implement ADR-0040 (embedding hardening)
+## Next task — pick up here: cut the v0.4.0 release
 
-**Approved and designed; not yet implemented.** Carry-over from the session that
-landed the `[lib]` target (ADR-0039). Implement the three follow-ups in
-[ADR-0040](adr/0040-embedding-hardening.md) as one PR (`feat/embedding-hardening`),
-then cut the release below.
+ADR-0040 (embedding hardening) is **implemented** — see "Embedding hardening
+landed" just below. The remaining task is the release itself.
 
-Implementation checklist:
-
-1. **`Signal::Exit(i32)` + `Signal::Limit`** — add both variants to the `Signal`
-   enum in `src/eval.rs`, and extend the manual `Debug for Signal` impl. The
-   compiler will flag every non-exhaustive `match`: update the two `sf_catch` arms
-   (both must **propagate** `Exit`/`Limit`, not catch them), `signal_message` in
-   `src/lib.rs`, the REPL loop in `src/repl.rs`, and `main.rs`.
-2. **`(exit)` returns `Err(Signal::Exit(code))`** — change `b_exit` in
-   `src/builtins.rs` (drop `std::process::exit`). In `src/main.rs`, `run_source`
-   must detect a top-level `Signal::Exit(code)` and map it to that process exit
-   code (keep CLI exit codes identical); the REPL treats `Exit` as quit. The Cilk
-   fork child is fine as-is (`interp.eval(...).unwrap_or(nil)` then `libc::_exit`).
-3. **Host builtins** — `Interp::register_builtin(name: &'static str, func)` is
-   already `pub`; re-export `BuiltinFn` at the crate root in `src/lib.rs`
-   (`pub use value::BuiltinFn;`), add a `tests/embed.rs` case that registers a host
-   `fn` and calls it, and a short README note. (Closure/`Box<dyn Fn>` builtins are
-   an explicit **deferred** follow-up — they need `Value::Builtin` widened.)
-4. **Eval-step limit** — add `eval_steps: Cell<u64>` + `eval_limit: Cell<u64>` (0 =
-   unlimited) to `Interp`; increment once at the top of `pub fn eval` and, when
-   `eval_limit != 0` and exceeded, return `Err(Signal::Limit)`. Add
-   `pub fn set_eval_limit(&self, n: Option<u64>)`; reset the counter at the start
-   of `eval_string`. `Signal::Limit` propagates past `catch` (like `Exit`).
-   Keep the no-limit path to a single `Cell` read + branch (ADR-0007, opt-in).
-5. **Tests/docs** — extend `tests/embed.rs` (exit-as-signal, host builtin, step
-   limit stops an infinite loop), verify the CLI is byte-identical (esp. exit
-   codes), update `CHANGELOG.md [Unreleased]` and the README "Embedding" caveats
-   (exit is now safe; note the step limit). Verify default + `--no-default-features`
-   + clippy + fmt + Windows cross-check.
-
-**Then: cut the release.** Follow the `niilisp-release-prep` skill. `[Unreleased]`
+**Cut the release.** Follow the `niilisp-release-prep` skill. `[Unreleased]`
 has accumulated a large arc since v0.3.2 (reference/query model, dates, XML/JSON,
 the `expand` fix, the library target, and this hardening slice) — this is a
 **minor** bump (new features, backward-compatible): **v0.4.0**. Seal the changelog,
 reconcile the README, regenerate `THIRD-PARTY-LICENSES.md`, open the release PR,
 get CI green + a human Go, then tag.
+
+### Embedding hardening landed (ADR-0040, 2026-07-11)
+
+The three ADR-0039 follow-ups are done (branch `docs/adr-0040-embedding-hardening`,
+not yet a separate PR): **`Signal` grew `Exit(i32)` + `Limit`** (both propagate
+past `catch`); **`(exit)` returns `Err(Signal::Exit(code))`** instead of
+`std::process::exit` — the CLI still maps a top-level one to its process exit code
+(verified byte-identical: `-e '(exit 3)'` → code 3) and the REPL treats it as
+quit; **host builtins** via the already-`pub` `Interp::register_builtin` +
+re-exported `niilisp::BuiltinFn`; and an **opt-in eval-step limit**
+(`Interp::set_eval_limit(Some(n))` → uncatchable `Signal::Limit`, counter reset
+per `eval_string`, single-`Cell`-read hot path when unset). Updated: the two
+`sf_catch` arms, `signal_message`, the `ffi` callback match, and a unit-test
+match. Tests: five new `tests/embed.rs` cases + a `register_builtin` doctest; full
+suite green under default and `--no-default-features`, clippy + fmt clean.
+**Deferred (recorded in the ADR):** closure/`Box<dyn Fn>` builtins (need
+`Value::Builtin` widened) and runtime sandboxing of the OS-touching builtins.
 
 ---
 
@@ -210,11 +196,11 @@ depends on the exact distribution.
 now builds a **`[lib]` target** (`use niilisp::{Interp, Value, Signal}`) so it can
 be embedded as an in-process interpreter; the CLI is a thin client of it. Curated
 surface = `Interp`/`Value`/`Signal` (both gained `Debug`); `examples/embed.rs` +
-`tests/embed.rs` cover it. Documented follow-ups worth doing next: an
-embedding-safe `exit` (return a `Signal::Exit(code)` instead of
-`std::process::exit`, so a host isn't killed), a way to register host-provided
-Rust builtins from outside the crate, and a step/resource limit for untrusted
-scripts.
+`tests/embed.rs` cover it. The three documented follow-ups — an embedding-safe
+`exit`, host-provided Rust builtins, and an eval-step limit — **all landed in
+[ADR-0040](adr/0040-embedding-hardening.md)** (see "Embedding hardening landed"
+above). Still deferred: closure/`Box<dyn Fn>` builtins and runtime sandboxing of
+the OS-touching builtins.
 
 ## Done since v0.1.0
 

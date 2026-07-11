@@ -5,7 +5,7 @@
 //! are reinstated even when an error unwinds. Non-local exit is `Result<Value,
 //! Signal>` (ADR-0011), so error unwinding and scope restoration share one path.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
@@ -16,11 +16,20 @@ use crate::value::{Builtin, BuiltinFn, Interner, Lambda, Param, SymId, Value};
 #[cfg(feature = "bigint")]
 use num_bigint::BigInt;
 
-/// Non-local control flow: `throw` and errors both unwind to the nearest
-/// `catch` (ADR-0011).
+/// Non-local control flow (ADR-0011, ADR-0040). `Throw` and `Error` unwind to
+/// the nearest `catch`; `Exit` and `Limit` are control signals that propagate
+/// **past** `catch` — a script cannot suppress its own exit or dodge the
+/// eval-step limit by catching.
 pub enum Signal {
     Throw(Value),
     Error(String),
+    /// `(exit code)` — an embedding-safe exit that unwinds instead of killing
+    /// the host process (ADR-0040). The CLI maps a top-level one to its process
+    /// exit code; the REPL quits; an embedder matches on it.
+    Exit(i32),
+    /// The opt-in eval-step ceiling was exceeded (ADR-0040); bounds an untrusted
+    /// script's run.
+    Limit,
 }
 
 impl std::fmt::Debug for Signal {
@@ -28,6 +37,8 @@ impl std::fmt::Debug for Signal {
         match self {
             Signal::Throw(v) => f.debug_tuple("Throw").field(v).finish(),
             Signal::Error(m) => f.debug_tuple("Error").field(m).finish(),
+            Signal::Exit(code) => f.debug_tuple("Exit").field(code).finish(),
+            Signal::Limit => f.write_str("Limit"),
         }
     }
 }
@@ -165,6 +176,11 @@ pub struct Interp {
     /// (ADR-0032). Fired at safe points by `dispatch_signals`.
     #[cfg(all(feature = "mt", unix))]
     signal_handlers: RefCell<HashMap<i32, Value>>,
+    /// Eval-step counter and its optional ceiling (0 = unlimited) for bounding
+    /// untrusted scripts (ADR-0040). The counter is incremented once per `eval`
+    /// only when a limit is set, and reset at each top-level `eval_string`.
+    eval_steps: Cell<u64>,
+    eval_limit: Cell<u64>,
 }
 
 /// Pops the `args` stack when a call returns (including on error unwind),
@@ -308,6 +324,8 @@ impl Interp {
             cilk: RefCell::new(crate::process::CilkState::default()),
             #[cfg(all(feature = "mt", unix))]
             signal_handlers: RefCell::new(HashMap::new()),
+            eval_steps: Cell::new(0),
+            eval_limit: Cell::new(0),
         };
         *interp.current_ctx.borrow_mut() = interp.intern("MAIN");
         builtins::install(&interp);
@@ -349,9 +367,20 @@ impl Interp {
         &self.signal_handlers
     }
 
+    /// Set an eval-step ceiling for untrusted scripts (ADR-0040). `None` (the
+    /// default) means unlimited; the counter resets at the start of each
+    /// top-level [`eval_string`](Self::eval_string), so the limit bounds one
+    /// script run, not the interpreter's lifetime. When exceeded, evaluation
+    /// stops with an uncatchable [`Signal::Limit`].
+    pub fn set_eval_limit(&self, n: Option<u64>) {
+        self.eval_limit.set(n.unwrap_or(0));
+    }
+
     /// Read `src` as code and evaluate all its forms, returning the last result
     /// (`eval-string`; also the guiserver's inbound-event dispatch path).
     pub fn eval_string(&self, src: &[u8]) -> Result<Value, Signal> {
+        // Bound this run, not the interpreter's lifetime (ADR-0040).
+        self.eval_steps.set(0);
         let forms = {
             let primitives = self.primitive_names();
             let mut interner = self.interner.borrow_mut();
@@ -546,6 +575,17 @@ impl Interp {
 
     /// Evaluate one expression.
     pub fn eval(&self, v: &Value) -> Result<Value, Signal> {
+        // Opt-in eval-step limit (ADR-0040). When no ceiling is set the fast
+        // path is a single `Cell` read plus a branch; the counter only advances
+        // once a limit is active.
+        let limit = self.eval_limit.get();
+        if limit != 0 {
+            let steps = self.eval_steps.get() + 1;
+            self.eval_steps.set(steps);
+            if steps > limit {
+                return Err(Signal::Limit);
+            }
+        }
         match v {
             Value::Symbol(id) => {
                 let val = self.lookup(*id);
@@ -2816,6 +2856,10 @@ impl Interp {
                         self.set_global(sym, Value::str(msg.into_bytes()));
                         Ok(Value::Nil)
                     }
+                    // Exit/Limit are control signals: they bypass `catch` so a
+                    // script cannot suppress its own exit or the step limit
+                    // (ADR-0040).
+                    Err(sig @ (Signal::Exit(_) | Signal::Limit)) => Err(sig),
                 }
             }
             // One-arg form: return the value, or the caught thrown value / error.
@@ -2823,6 +2867,7 @@ impl Interp {
                 Ok(v) => Ok(v),
                 Err(Signal::Throw(v)) => Ok(v),
                 Err(Signal::Error(msg)) => Ok(Value::str(msg.into_bytes())),
+                Err(sig @ (Signal::Exit(_) | Signal::Limit)) => Err(sig),
             },
         }
     }
@@ -3065,6 +3110,8 @@ mod tests {
                 Ok(v) => v,
                 Err(Signal::Error(msg)) => panic!("evaluation error: {}", msg),
                 Err(Signal::Throw(_)) => panic!("uncaught throw"),
+                Err(Signal::Exit(code)) => panic!("unexpected exit({code})"),
+                Err(Signal::Limit) => panic!("unexpected eval-step limit"),
             };
         }
         last
