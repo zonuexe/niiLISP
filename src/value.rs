@@ -61,6 +61,31 @@ pub enum Value {
     Bigint(num_bigint::BigInt),
 }
 
+/// A structural `Debug` for embedders (`dbg!`, `.unwrap()`, assert failures).
+/// It does not resolve symbol names (no interner here) — use [`crate::eval::Interp::repr`]
+/// for newLISP-syntax output.
+impl std::fmt::Debug for Value {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Value::Nil => write!(f, "Nil"),
+            Value::True => write!(f, "True"),
+            Value::Int(n) => write!(f, "Int({n})"),
+            Value::Float(x) => write!(f, "Float({x})"),
+            Value::Str(b) => write!(f, "Str({:?})", String::from_utf8_lossy(b)),
+            Value::Symbol(id) => write!(f, "Symbol(#{id})"),
+            Value::Context(id) => write!(f, "Context(#{id})"),
+            Value::List(l) => f.debug_tuple("List").field(&**l).finish(),
+            Value::Array(a) => f.debug_tuple("Array").field(&**a).finish(),
+            Value::Lambda(_) => write!(f, "Lambda(..)"),
+            Value::Fexpr(_) => write!(f, "Fexpr(..)"),
+            Value::Builtin(b) => write!(f, "Builtin({})", b.name),
+            Value::Foreign(_) => write!(f, "Foreign(..)"),
+            #[cfg(feature = "bigint")]
+            Value::Bigint(n) => write!(f, "Bigint({n})"),
+        }
+    }
+}
+
 /// One formal parameter, with an optional default value (e.g. `(r 0)`).
 pub struct Param {
     pub sym: SymId,
