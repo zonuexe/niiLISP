@@ -34,7 +34,7 @@ name = "niilisp"
 path = "src/main.rs"
 
 [features]
-default = ["ffi", "bigint", "regex", "mt", "net", "readline"]
+default = ["ffi", "bigint", "regex", "mt", "net", "readline", "date"]
 # Interactive line editing for the REPL: history, multi-line continuation,
 # matching-bracket highlighting, and Tab symbol completion via the pure-Rust
 # `rustyline` crate (no system libreadline). Off via --no-default-features falls
@@ -60,6 +60,12 @@ mt = ["dep:libc"]
 # receive/select over TCP and Unix-domain sockets. Real sockets via libc; Unix-
 # only (cfg'd out on non-Unix even when on). Off via --no-default-features.
 net = ["dep:libc"]
+# Local-time refinement for the date/time builtins (ADR-0037): `date`/`now`
+# report the local timezone and `date` uses the C library's `strftime`, plus
+# `date-parse` (`strptime`, Unix-only). Via libc; Unix-only for the local paths.
+# The pure-Rust UTC core (`date-value`/`date-list`) is always compiled; off via
+# --no-default-features, `date`/`now` fall back to UTC and `date-parse` is nil.
+date = ["dep:libc"]
 # Native GUI helper (ADR-0034): builds the `niilisp-gui` fltk binary that the
 # `gs:` module drives over a socket. Default OFF — the toolkit is a heavy,
 # display-dependent, niche dependency confined to the helper binary; the

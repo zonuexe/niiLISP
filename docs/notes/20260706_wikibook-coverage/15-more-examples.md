@@ -8,7 +8,7 @@ The chapter's complete example programs: **both file-tree text editors and both 
 |---|---|---|
 | On your own terms — `set` alias via `(global 'set!)` | ✅ | Fixed 2026-07-06: `global` implemented; `(constant (global 'set!) set)` installs the alias and `(set! 'q 5)` works |
 | On your own terms — custom `println` counter override | ✅ | Fixed 2026-07-06: `(set (global 'println) Output)` overrides the builtin and later `println` calls dispatch to the override |
-| Simple countdown timer (`countdown` script) | ❌ | Still missing builtins: `date-value`, `date`, `ostype` unbound (`letn` and `$idx` now implemented) |
+| Simple countdown timer (`countdown` script) | ❌ | Only `ostype` is still unbound now (`date-value`/`date`/`letn`/`$idx` all implemented 2026-07-06) |
 | Editing text files in folders (basic, non-recursive) | ✅ | Reads each file, regex-`replace`s, writes back — verified end-to-end (fixed 2026-07-06: regex `replace` now substitutes and re-evaluates per match) |
 | Editing text files in a hierarchy (recursive version) | ✅ | Recurses via `directory`/`directory?` and edits each file; the earlier `page`-variable "corruption" was a symptom of the broken `replace`, now resolved (fixed 2026-07-06) |
 | Talking to other applications (Illustrator AppleScript circle script) | ❌ (not runnable here) | Platform-specific: requires `osascript`/Adobe Illustrator on macOS; not functionally probed, but relies on the same `exec`/`format`/`set` idioms that work fine standalone — no niiLISP-specific blocker identified beyond the missing app |

@@ -291,6 +291,7 @@ impl Interp {
         crate::fileio::install(&interp);
         crate::process::install(&interp);
         crate::net::install(&interp);
+        crate::date::install(&interp);
         interp
     }
 

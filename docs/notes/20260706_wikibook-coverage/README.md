@@ -10,7 +10,7 @@ does each feature the book teaches actually work in niiLISP, and does it behave 
 
 ## Summary
 
-**≈243 ✅ / 12 ⚠️ / 61 ❌** across ~314 probed items (~77% work as the book describes). Counts mix granularities — most chapters count individual functions; ch. 15 counts whole example programs — and a few chapters' own tallies are approximate, so treat these as directional, not exact.
+**≈248 ✅ / 12 ⚠️ / 56 ❌** across ~314 probed items (~79% work as the book describes). Counts mix granularities — most chapters count individual functions; ch. 15 counts whole example programs — and a few chapters' own tallies are approximate, so treat these as directional, not exact.
 
 | # | Chapter | ✅ | ⚠️ | ❌ | Report |
 |---|---------|----|----|----|--------|
@@ -22,7 +22,7 @@ does each feature the book teaches actually work in niiLISP, and does it behave 
 | 6 | Contexts | 15 | 1 | 2 | [06-contexts.md](06-contexts.md) |
 | 7 | Macros | 6 | 0 | 1 | [07-macros.md](07-macros.md) |
 | 8 | Working with numbers | 33 | 1 | 4 | [08-working-with-numbers.md](08-working-with-numbers.md) |
-| 9 | Working with dates and times | 3 | 0 | 6 | [09-dates-and-times.md](09-dates-and-times.md) |
+| 9 | Working with dates and times | 8 | 0 | 1 | [09-dates-and-times.md](09-dates-and-times.md) |
 | 10 | Working with files | 26 | 2 | 8 | [10-working-with-files.md](10-working-with-files.md) |
 | 11 | Multitasking | 10 | 2 | 2 | [11-multitasking.md](11-multitasking.md) |
 | 12 | Working with XML | 1 | 0 | 6 | [12-working-with-xml.md](12-working-with-xml.md) |
@@ -36,7 +36,7 @@ does each feature the book teaches actually work in niiLISP, and does it behave 
 **Solid (the core language).** Chapters 1–3 and 5–8 — basics, flow control, lists, apply/map, contexts, macros, numbers — are largely faithful. Notably, the **bigint model matches newLISP exactly** (operand-triggered promotion, `L` suffix, too-large literals), FOOP/contexts work, and the fork-based **multitasking** and **TCP networking** cores (ch. 11, 14) are real and verified against live local processes/sockets.
 
 **Whole subsystems absent (the bulk of the ❌).** These cluster, matching the earlier [gap analysis](../20260706_newlisp-gap-analysis.md):
-- **Dates & times** (ch. 9) — `date`/`now`/`date-value`/`date-parse`/`timer` all unbound; only `time`/`sleep` work.
+- ~~**Dates & times** (ch. 9)~~ — **implemented 2026-07-06** (ADR-0037): `date`/`now`/`date-value`/`date-list`/`date-parse`; only the `timer` scheduler remains.
 - **XML / JSON** (ch. 12) — no `xml-parse`/`xml-type-tags`/`json-parse` at all.
 - **Debugger** (ch. 13) — no `trace`/`debug`/`error-event` family; only `catch`/`throw`.
 - **HTTP & UDP** (ch. 14) — `get-url`/`put-url`/`post-url` and all UDP/`net-lookup`/`net-eval` missing (stream sockets present).
