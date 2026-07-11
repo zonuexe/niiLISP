@@ -67,11 +67,13 @@ found ~221 of 378 primitives missing, clustered into whole unbuilt subsystems
 [WikiBook coverage report](notes/20260706_wikibook-coverage/) complements it as a
 living, example-driven backlog: the near-term divergences (⚠️) are now fixed, so
 what remains is **whole unimplemented subsystems (❌)** — best filled one planned
-slice at a time. Highest-value remaining ❌, roughly: **dates/times**
-(`date`/`now`/`date-value`/`date-parse`/`timer` — need timezone handling),
+slice at a time. Highest-value remaining ❌, roughly:
 **XML/JSON** (`xml-parse`/`json-parse`), the
 **debugger** (`trace`/`debug`/`error-event`), and **HTTP/UDP**
-(`get-url`/`net-*-udp`). The pattern/reference family
+(`get-url`/`net-*-udp`). **Dates/times** landed 2026-07-06 under
+[ADR-0037](adr/0037-dates-and-times.md) (`date`/`now`/`date-value`/`date-list`/
+`date-parse`; a pure UTC core plus libc local time behind a `date` feature); only
+`timer` remains. The pattern/reference family
 (`ref`/`ref-all`/`match`/`find-all`/`pop-assoc`) landed 2026-07-06 under
 [ADR-0036](adr/0036-reference-and-query-model.md), completing the *Lists* chapter;
 `unify` remains deferred. **North star (grilled): order
@@ -132,12 +134,13 @@ round-trip binary strings). Candidates, roughly by value:
   the batch-read model — see the contexts known-limitation note below),
   `series`/`factor` (2026-07-06), the reference/query family
   `ref`/`ref-all`/`match`/`find-all`/`pop-assoc` + `push`/`pop` index vectors
-  (ADR-0036, 2026-07-06),
+  (ADR-0036, 2026-07-06), dates/times `date`/`now`/`date-value`/`date-list`/
+  `date-parse` (ADR-0037, 2026-07-06),
   reflection predicates (`context?`/`lambda?`/`macro?`/`primitive?`/`bigint?`/
   `protected?`), `title-case`. **Remaining:** XML/JSON (`xml-parse`/`json-parse`),
-  dates (`date`/`now`/`date-value` — need timezone handling), symbol reflection
+  the `timer` scheduler, symbol reflection
   (`sym`/`symbols`/`name`/`prefix`), `unify` (Prolog-style, deferred per
-  ADR-0036), `bind`, matrix/stats math.
+  ADR-0036), `bind`, `doargs`, `ostype`, matrix/stats math.
 
 **Windows note:** `qa-utf16path` needs faithful UTF-16 path handling (file I/O
 currently does lossy UTF-8 on Windows, binary-safe on Unix — ADR-0029). A future

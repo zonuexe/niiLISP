@@ -11,6 +11,7 @@
 //! ```
 
 mod builtins;
+mod date;
 mod eval;
 mod ffi;
 mod fileio;
