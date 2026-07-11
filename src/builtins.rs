@@ -1322,11 +1322,12 @@ pub(crate) fn expand_symbols(interp: &Interp, v: &Value, syms: &[SymId]) -> Valu
     }
 }
 
-/// Substitute the value of every upper-case-initial symbol bound to a **code-like**
-/// value (a list or a function), recursively (ADR-0027) — newLISP's
-/// `(expand expr)` form. Self-evaluating atoms (numbers, strings) are left as the
-/// symbol: substituting a loop variable's number into a parameter position would
-/// break the built lambda, which is the gist's documented reused-variable hazard.
+/// Substitute the value of every upper-case-initial symbol bound to a **non-nil**
+/// value, recursively — newLISP's `(expand expr)` PROLOG form. Per the manual,
+/// "only uppercase variables and those bound to anything other than nil will be
+/// expanded" (any value type, including numbers): `(set 'A 1 'C nil) (expand '(A
+/// C d))` → `(1 C d)`. A nested lambda list is left opaque so `expand` never
+/// rewrites a lambda's own parameters (ADR-0027).
 fn expand_uppercase(interp: &Interp, v: &Value) -> Value {
     match v {
         Value::Symbol(id) => {
@@ -1337,14 +1338,7 @@ fn expand_uppercase(interp: &Interp, v: &Value) -> Value {
                 .is_some_and(|c| c.is_ascii_uppercase());
             if starts_upper {
                 let val = interp.lookup(*id);
-                if matches!(
-                    val,
-                    Value::List(_)
-                        | Value::Lambda(_)
-                        | Value::Fexpr(_)
-                        | Value::Builtin(_)
-                        | Value::Foreign(_)
-                ) {
+                if !matches!(val, Value::Nil) {
                     return val;
                 }
             }

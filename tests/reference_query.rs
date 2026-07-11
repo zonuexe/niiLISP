@@ -113,17 +113,36 @@ fn push_pop_index_vectors() {
 }
 
 #[test]
-fn find_all_forms() {
+fn find_all_list_forms() {
+    let src = r#"
+(println (find-all '(a ?) '((a 1) (b 2) (a 3) (c 4))))
+(println (find-all 3 '(1 3 2 3 3)))
+(exit)
+"#;
+    let out = run("find-all-list", src);
+    let l: Vec<&str> = out.lines().collect();
+    assert_eq!(
+        l.first().copied(),
+        Some("((a 1) (a 3))"),
+        "list pattern:\n{}",
+        out
+    );
+    assert_eq!(l.get(1).copied(), Some("(3 3 3)"), "key:\n{}", out);
+}
+
+// The regex form of find-all needs the `regex` feature (the pure build returns
+// an error for a string pattern over a string).
+#[cfg(feature = "regex")]
+#[test]
+fn find_all_regex_form() {
     let src = r#"
 (println (find-all "wo.d" "word work wold ward"))
 (println (find-all "\\w+" "the quick fox" (upper-case $0)))
-(println (find-all '(a ?) '((a 1) (b 2) (a 3) (c 4))))
-(println (find-all 3 '(1 3 2 3 3)))
 (find-all "o" "foo boo")
 (println $count)
 (exit)
 "#;
-    let out = run("find-all", src);
+    let out = run("find-all-regex", src);
     let l: Vec<&str> = out.lines().collect();
     assert_eq!(
         l.first().copied(),
@@ -137,14 +156,7 @@ fn find_all_forms() {
         "regex transform:\n{}",
         out
     );
-    assert_eq!(
-        l.get(2).copied(),
-        Some("((a 1) (a 3))"),
-        "list pattern:\n{}",
-        out
-    );
-    assert_eq!(l.get(3).copied(), Some("(3 3 3)"), "key:\n{}", out);
-    assert_eq!(l.get(4).copied(), Some("4"), "$count:\n{}", out);
+    assert_eq!(l.get(2).copied(), Some("4"), "$count:\n{}", out);
 }
 
 #[test]
