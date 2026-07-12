@@ -1,0 +1,61 @@
+name: Release binaries (manual)
+
+# Manually (re)build and attach the per-platform binaries to an existing GitHub
+# Release. This is the recovery path for when `release.yml`'s `publish-crate`
+# step failed AFTER the crate was already published (e.g. a crates.io outage or
+# an expired CARGO_REGISTRY_TOKEN), so the tag-triggered `binaries` job — which
+# `needs: publish-crate` — never ran and re-running it would now fail on
+# `cargo publish` ("already exists"). Dispatch this with the tag instead.
+#
+# Safe to run repeatedly: it only builds and uploads binary assets to the
+# Release for the given tag; it never touches crates.io. Each Unix target builds
+# on a NATIVE runner (its own system libffi, no cross-compilation); Windows
+# builds pure. Mirrors the matrix in `release.yml` (ADR-0018).
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to build binaries for (e.g. v0.4.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write # upload binary assets to the Release
+
+jobs:
+  binaries:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest # x86_64 Linux (native)
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-24.04-arm # arm64 Linux (native)
+            target: aarch64-unknown-linux-gnu
+          - os: macos-latest # arm64 macOS (native)
+            target: aarch64-apple-darwin
+          - os: windows-latest # Windows ships pure (no FFI)
+            target: x86_64-pc-windows-msvc
+            no-default-features: true
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.tag }} # build the tagged source, not the default branch
+
+      # The `ffi` feature dynamically links the system libffi (ADR-0018).
+      - name: Install libffi (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libffi-dev
+
+      - name: Build and upload binary
+        uses: taiki-e/upload-rust-binary-action@v1
+        with:
+          bin: niilisp
+          target: ${{ matrix.target }}
+          archive: $bin-$tag-$target
+          ref: refs/tags/${{ inputs.tag }} # upload to this tag's Release; names $tag
+          # Unix ships with the default `ffi`; Windows ships pure.
+          no-default-features: ${{ matrix.no-default-features || false }}
+          token: ${{ secrets.GITHUB_TOKEN }}
