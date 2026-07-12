@@ -5,6 +5,21 @@ what is deliberately deferred, so work can resume without re-deriving context.
 
 ## Status
 
+- **v0.4.0 released** (2026-07-12): on [crates.io](https://crates.io/crates/niilisp)
+  (`cargo install niilisp`) and as GitHub Release binaries for the 4 targets. Ships
+  the embedding library target (ADR-0039) and embedding hardening (ADR-0040:
+  embedding-safe `(exit)` → `Signal::Exit`, host builtins via `register_builtin` +
+  re-exported `BuiltinFn`, and an opt-in eval-step limit `Signal::Limit`), plus the
+  arc since v0.3.2 (reference/query model, dates, XML/JSON, the `expand` fix).
+  **Release incident + recovery:** the tag-triggered `release.yml` publish failed —
+  first a transient crates.io `503`, then a `403 authentication failed` (the
+  `CARGO_REGISTRY_TOKEN` secret was stale). The crate was published manually once
+  crates.io recovered; because `binaries` `needs: publish-crate` (which can't rerun
+  after `cargo publish` "already exists"), the GitHub Release was created by hand and
+  the binaries attached via a new manual **`release-binaries.yml`** (`workflow_dispatch`
+  by tag) — a reusable recovery path for this exact failure. **Action for next
+  release:** confirm `CARGO_REGISTRY_TOKEN` is refreshed (non-expiring or long-lived)
+  so the normal CI publish path works unattended.
 - **v0.2.0 released** (2026-07-06): on [crates.io](https://crates.io/crates/niilisp)
   (`cargo install niilisp`) and as GitHub Release binaries for 4 targets
   (x86_64/aarch64 Linux + aarch64 macOS with FFI, x86_64 Windows pure). Ships the
@@ -59,17 +74,14 @@ what is deliberately deferred, so work can resume without re-deriving context.
   `min`/`max`/`even?`/`odd?`/`flat`/`join`/`member`/`unique`/`true?`, and the
   `dostring`/`until`/`extend`/`swap` special forms.
 
-## Next task — pick up here: cut the v0.4.0 release
+## Next task — pick up here: choose the next backlog slice
 
-ADR-0040 (embedding hardening) is **implemented** — see "Embedding hardening
-landed" just below. The remaining task is the release itself.
-
-**Cut the release.** Follow the `niilisp-release-prep` skill. `[Unreleased]`
-has accumulated a large arc since v0.3.2 (reference/query model, dates, XML/JSON,
-the `expand` fix, the library target, and this hardening slice) — this is a
-**minor** bump (new features, backward-compatible): **v0.4.0**. Seal the changelog,
-reconcile the README, regenerate `THIRD-PARTY-LICENSES.md`, open the release PR,
-get CI green + a human Go, then tag.
+v0.4.0 is **released** (see Status above); ADR-0039/0040 embedding work is done and
+shipped. Pick the next slice from the backlog below — the highest-value remaining
+❌ subsystems are roughly the **debugger** (`trace`/`debug`/`error-event`) and
+**HTTP/UDP** (`get-url`/`net-*-udp`); smaller independent leaves (`timer`, symbol
+reflection `sym`/`symbols`/`name`/`prefix`, `bind`, `doargs`, `ostype`) are also
+open. Grill the chosen slice before writing an ADR.
 
 ### Embedding hardening landed (ADR-0040, 2026-07-11)
 
